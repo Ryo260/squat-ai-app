@@ -3,14 +3,14 @@
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import Webcam from 'react-webcam';
-import { Pose, Results } from '@mediapipe/pose';
-import { Camera } from '@mediapipe/camera_utils';
+// ★注意：ここで @mediapipe を import するとビルドエラーになるので削除しました。
+// 代わりに下の方で「ダイナミックインポート」します。
 
 // ★バージョン
-const APP_VERSION = "v0.0.4 (Fixed)";
+const APP_VERSION = "v0.0.5 (Build Fix)";
 
 // ---------------------------------------------------------
-// 判定ロジック（コンポーネントの外に出して安定化）
+// 判定ロジック
 // ---------------------------------------------------------
 const calculateAngle = (a: any, b: any, c: any) => {
   const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
@@ -27,15 +27,15 @@ const WorkoutScreen = ({ onBack }: { onBack: () => void }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [count, setCount] = useState(0);
   const [isSquatting, setIsSquatting] = useState(false);
-  const [feedback, setFeedback] = useState("準備中...");
+  const [feedback, setFeedback] = useState("AI読み込み中...");
+  const [isLoading, setIsLoading] = useState(true);
   
-  const onResults = useCallback((results: Results) => {
+  const onResults = useCallback((results: any) => {
     if (!canvasRef.current || !webcamRef.current || !webcamRef.current.video) return;
 
     const videoWidth = webcamRef.current.video.videoWidth;
     const videoHeight = webcamRef.current.video.videoHeight;
     
-    // キャンバスサイズ設定
     canvasRef.current.width = videoWidth;
     canvasRef.current.height = videoHeight;
 
@@ -88,35 +88,58 @@ const WorkoutScreen = ({ onBack }: { onBack: () => void }) => {
         setFeedback("全身を映してください");
     }
     canvasCtx.restore();
-  }, [isSquatting]); // 依存配列を整理
+  }, [isSquatting]);
 
   useEffect(() => {
-    const pose = new Pose({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
-    });
+    let camera: any = null;
+    let pose: any = null;
 
-    pose.setOptions({
-      modelComplexity: 0,
-      smoothLandmarks: true,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-    });
+    // ★重要：ここでAIを読み込みます（サーバービルド回避）
+    const loadMediaPipe = async () => {
+      try {
+        const poseModule = await import('@mediapipe/pose');
+        const cameraModule = await import('@mediapipe/camera_utils');
 
-    pose.onResults(onResults);
+        pose = new poseModule.Pose({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+        });
 
-    if (webcamRef.current && webcamRef.current.video) {
-      const camera = new Camera(webcamRef.current.video, {
-        onFrame: async () => {
-          if (webcamRef.current?.video) {
-            try { await pose.send({ image: webcamRef.current.video }); } 
-            catch (e) { console.error(e); }
-          }
-        },
-        width: 640,
-        height: 480,
-      });
-      camera.start();
-    }
+        pose.setOptions({
+          modelComplexity: 0,
+          smoothLandmarks: true,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+
+        pose.onResults(onResults);
+
+        if (webcamRef.current && webcamRef.current.video) {
+          camera = new cameraModule.Camera(webcamRef.current.video, {
+            onFrame: async () => {
+              if (webcamRef.current?.video && pose) {
+                await pose.send({ image: webcamRef.current.video });
+              }
+            },
+            width: 640,
+            height: 480,
+          });
+          camera.start();
+          setIsLoading(false);
+          setFeedback("準備完了！");
+        }
+      } catch (error) {
+        console.error("MediaPipe Load Error:", error);
+        setFeedback("エラー:再読み込みしてください");
+      }
+    };
+
+    loadMediaPipe();
+
+    // クリーンアップ
+    return () => {
+      if (camera) camera.stop();
+      if (pose) pose.close();
+    };
   }, [onResults]);
 
   return (
@@ -141,12 +164,19 @@ const WorkoutScreen = ({ onBack }: { onBack: () => void }) => {
         />
         <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full object-cover" />
         
-        <div className="absolute top-4 left-4 bg-gray-900/80 p-3 rounded-xl backdrop-blur-sm border border-gray-700">
+        {/* ローディング表示 */}
+        {isLoading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+                <p className="text-white font-bold animate-pulse">AIモデル起動中...</p>
+            </div>
+        )}
+
+        <div className="absolute top-4 left-4 bg-gray-900/80 p-3 rounded-xl backdrop-blur-sm border border-gray-700 z-20">
           <p className="text-xs text-gray-400 mb-1">COUNT</p>
           <p className="text-4xl font-bold text-yellow-400 leading-none">{count}</p>
         </div>
 
-        <div className="absolute bottom-8 left-0 w-full text-center px-4">
+        <div className="absolute bottom-8 left-0 w-full text-center px-4 z-20">
           <span className="inline-block bg-blue-600/90 px-6 py-2 rounded-full text-lg font-bold shadow-lg backdrop-blur-md">
             {feedback}
           </span>

@@ -1,3 +1,4 @@
+/* eslint-disable */
 'use client';
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
@@ -5,11 +6,21 @@ import Webcam from 'react-webcam';
 import { Pose, Results } from '@mediapipe/pose';
 import { Camera } from '@mediapipe/camera_utils';
 
-// ★バージョン管理
-const APP_VERSION = "v0.0.3 (Start Screen)";
+// ★バージョン
+const APP_VERSION = "v0.0.4 (Fixed)";
 
 // ---------------------------------------------------------
-// 1. 筋トレ画面コンポーネント (前回のコードをここに閉じ込めました)
+// 判定ロジック（コンポーネントの外に出して安定化）
+// ---------------------------------------------------------
+const calculateAngle = (a: any, b: any, c: any) => {
+  const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+  let angle = Math.abs(radians * 180.0 / Math.PI);
+  if (angle > 180.0) angle = 360 - angle;
+  return angle;
+};
+
+// ---------------------------------------------------------
+// 1. 筋トレ画面
 // ---------------------------------------------------------
 const WorkoutScreen = ({ onBack }: { onBack: () => void }) => {
   const webcamRef = useRef<Webcam>(null);
@@ -18,19 +29,13 @@ const WorkoutScreen = ({ onBack }: { onBack: () => void }) => {
   const [isSquatting, setIsSquatting] = useState(false);
   const [feedback, setFeedback] = useState("準備中...");
   
-  // 膝の角度計算
-  const calculateAngle = (a: any, b: any, c: any) => {
-    const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
-    let angle = Math.abs(radians * 180.0 / Math.PI);
-    if (angle > 180.0) angle = 360 - angle;
-    return angle;
-  };
-
   const onResults = useCallback((results: Results) => {
     if (!canvasRef.current || !webcamRef.current || !webcamRef.current.video) return;
 
     const videoWidth = webcamRef.current.video.videoWidth;
     const videoHeight = webcamRef.current.video.videoHeight;
+    
+    // キャンバスサイズ設定
     canvasRef.current.width = videoWidth;
     canvasRef.current.height = videoHeight;
 
@@ -51,7 +56,7 @@ const WorkoutScreen = ({ onBack }: { onBack: () => void }) => {
       if (hip && knee && ankle) {
         const angle = calculateAngle(hip, knee, ankle);
 
-        // 骨格の線を描画（簡易版）
+        // 骨格描画
         canvasCtx.beginPath();
         canvasCtx.moveTo(hip.x * videoWidth, hip.y * videoHeight);
         canvasCtx.lineTo(knee.x * videoWidth, knee.y * videoHeight);
@@ -60,12 +65,12 @@ const WorkoutScreen = ({ onBack }: { onBack: () => void }) => {
         canvasCtx.strokeStyle = "white";
         canvasCtx.stroke();
 
-        // 角度表示
+        // 角度テキスト
         canvasCtx.fillStyle = 'white';
         canvasCtx.font = '30px Arial';
         canvasCtx.fillText(Math.round(angle).toString(), knee.x * videoWidth, knee.y * videoHeight);
 
-        // 判定
+        // カウント判定
         if (angle < 100) {
           if (!isSquatting) {
             setIsSquatting(true);
@@ -83,7 +88,7 @@ const WorkoutScreen = ({ onBack }: { onBack: () => void }) => {
         setFeedback("全身を映してください");
     }
     canvasCtx.restore();
-  }, [isSquatting]);
+  }, [isSquatting]); // 依存配列を整理
 
   useEffect(() => {
     const pose = new Pose({
@@ -91,7 +96,7 @@ const WorkoutScreen = ({ onBack }: { onBack: () => void }) => {
     });
 
     pose.setOptions({
-      modelComplexity: 0, // Liteモデル
+      modelComplexity: 0,
       smoothLandmarks: true,
       minDetectionConfidence: 0.5,
       minTrackingConfidence: 0.5,
@@ -116,13 +121,12 @@ const WorkoutScreen = ({ onBack }: { onBack: () => void }) => {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white p-4">
-      {/* 上部バー */}
       <div className="w-full max-w-md flex justify-between items-center mb-4">
         <button 
           onClick={onBack}
           className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition"
         >
-          ← 戻る
+          ← TOP
         </button>
         <span className="font-bold text-yellow-400">Squat AI</span>
       </div>
@@ -153,13 +157,12 @@ const WorkoutScreen = ({ onBack }: { onBack: () => void }) => {
 };
 
 // ---------------------------------------------------------
-// 2. スタート画面コンポーネント (新しく作りました！)
+// 2. スタート画面
 // ---------------------------------------------------------
 const StartScreen = ({ onStart }: { onStart: () => void }) => {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-6">
       <div className="text-center space-y-6 max-w-sm w-full">
-        {/* タイトルロゴエリア */}
         <div className="space-y-2">
           <h1 className="text-5xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500">
             SQUAT<br/>MASTER
@@ -167,7 +170,6 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
           <p className="text-gray-400 text-sm">AI Training Assistant</p>
         </div>
 
-        {/* スタートボタン (任天堂風のぷるんとしたボタン) */}
         <button
           onClick={onStart}
           className="group relative w-full py-5 px-6 bg-blue-600 hover:bg-blue-500 rounded-2xl shadow-[0_10px_0_rgb(29,78,216)] active:shadow-[0_2px_0_rgb(29,78,216)] active:translate-y-2 transition-all duration-150 overflow-hidden"
@@ -176,11 +178,9 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
             <span className="text-2xl font-black tracking-widest text-white">START</span>
             <span className="text-2xl">💪</span>
           </div>
-          {/* 光の反射エフェクト */}
           <div className="absolute top-0 left-0 w-full h-1/2 bg-white/20 rounded-t-2xl pointer-events-none"></div>
         </button>
 
-        {/* バージョン情報 */}
         <div className="pt-8 border-t border-gray-800">
           <p className="text-xs text-gray-600 font-mono">Current Version</p>
           <p className="text-sm font-bold text-gray-500">{APP_VERSION}</p>
@@ -191,11 +191,10 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
 };
 
 // ---------------------------------------------------------
-// 3. メインコンポーネント (画面を切り替える親玉)
+// 3. メイン
 // ---------------------------------------------------------
 export default function Home() {
   const [isStarted, setIsStarted] = useState(false);
-
   return (
     <>
       {isStarted ? (

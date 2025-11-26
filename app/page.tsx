@@ -72,16 +72,12 @@ export default function Home() {
         const rAngle = calculateAngle(rHip, rKnee, rAnkle);
         targetAngle = Math.min(lAngle, rAngle);
         
-        // 描画
-        const drawLeg = (h:any, k:any, a:any, color:string) => {
-            if(h.visibility < 0.5) return;
-            drawLine(ctx, {x:h.x*width, y:h.y*height}, {x:k.x*width, y:k.y*height}, {x:a.x*width, y:a.y*height}, color);
-        };
-        // 簡易描画関数
+        // 描画関数 (修正済み)
         const drawL = (p1:any, p2:any, p3:any, col:string) => {
             drawLine(ctx, {x:p1.x*width, y:p1.y*height}, {x:p2.x*width, y:p2.y*height}, col);
             drawLine(ctx, {x:p2.x*width, y:p2.y*height}, {x:p3.x*width, y:p3.y*height}, col);
         }
+
         if (lHip.visibility > 0.5) drawL(lHip, lKnee, lAnkle, '#00FFFF');
         if (rHip.visibility > 0.5) drawL(rHip, rKnee, rAnkle, '#FF00FF');
       }
@@ -195,17 +191,16 @@ export default function Home() {
         onLoad={() => setIsScriptLoaded(true)}
       />
 
-      {/* 映像エリア: object-containで比率維持＆全画面フィット */}
+      {/* 映像エリア */}
       <div className="relative w-full h-full flex items-center justify-center">
         {!isScriptLoaded && <div className="text-white animate-pulse">System Booting...</div>}
         <Webcam ref={webcamRef} className="absolute opacity-0 w-0 h-0" mirrored={false} />
         <canvas ref={canvasRef} className="max-w-full max-h-full object-contain" />
       </div>
 
-      {/* UIレイヤー: 映像の上に重ねる */}
+      {/* UIレイヤー */}
       <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 safe-area-inset">
           
-          {/* 上部コントロール */}
           <div className="flex justify-between items-start pointer-events-auto mt-2">
               <div className="bg-black/60 backdrop-blur-md px-4 py-2 rounded-xl border border-white/10">
                 <p className="text-xs text-gray-400 font-bold">TOTAL</p>
@@ -224,13 +219,12 @@ export default function Home() {
               </div>
           </div>
 
-          {/* 中央ポップアップ */}
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             {popCount !== null && (
                 <div 
                     className="font-black text-yellow-400 animate-ping-once select-none"
                     style={{ 
-                        fontSize: '30vh', // 画面高さの30%
+                        fontSize: '30vh', 
                         textShadow: '0 10px 30px rgba(0,0,0,1)' 
                     }}
                 >
@@ -239,7 +233,6 @@ export default function Home() {
             )}
           </div>
 
-          {/* 下部フィードバック (位置を底上げ) */}
           <div className="flex justify-center mb-10">
              <span className={`px-8 py-3 rounded-full text-2xl font-black shadow-2xl backdrop-blur-lg transition-all duration-200 border-2 border-white/10 ${feedback === 'OK!' ? 'bg-green-500 text-white scale-110' : 'bg-blue-600/80 text-white'}`}>
                 {feedback}

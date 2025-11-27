@@ -6,7 +6,7 @@ import Webcam from 'react-webcam';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 
-const APP_VERSION = "v0.1.3 (Top Heatmap)";
+const APP_VERSION = "v0.1.4 (Build Fix)";
 
 // ---------------------------------------------------------
 // 型定義 & ユーティリティ
@@ -34,33 +34,56 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
   const [heatmapData, setHeatmapData] = useState<{date: string, count: number}[]>([]);
   const [totalCount, setTotalCount] = useState(0);
 
-  useEffect(() => {
-    // データ読み込み
-    const saved = localStorage.getItem('squat_sessions');
-    if (saved) {
-      const parsed: WorkoutSession[] = JSON.parse(saved);
-      setTotalCount(parsed.reduce((sum, s) => sum + s.count, 0));
+  // 日付文字列を取得する関数 (ローカルタイム)
+  const getTodayStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
 
-      const map: {[key: string]: number} = {};
-      parsed.forEach(s => {
-        const d = new Date(s.date).toISOString().split('T')[0];
-        map[d] = (map[d] || 0) + s.count;
-      });
-      const data = Object.keys(map).map(date => ({ date, count: map[date] }));
-      setHeatmapData(data);
+  useEffect(() => {
+    const saved = localStorage.getItem('squat_sessions');
+    let parsed: WorkoutSession[] = [];
+    if (saved) {
+      parsed = JSON.parse(saved);
+      setTotalCount(parsed.reduce((sum, s) => sum + s.count, 0));
     }
+
+    // ヒートマップデータ作成
+    const map: {[key: string]: number} = {};
+    parsed.forEach(s => {
+      // 保存されたISO文字列をローカル日付に変換して集計
+      const d = new Date(s.date);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+      
+      map[dateStr] = (map[dateStr] || 0) + s.count;
+    });
+
+    // ★修正ポイント：今日の日付がマップになければ、0回として追加する
+    // これにより、今日の枠が必ずヒートマップに渡されるようになる
+    const todayStr = getTodayStr();
+    if (map[todayStr] === undefined) {
+      map[todayStr] = 0;
+    }
+
+    const data = Object.keys(map).map(date => ({ date, count: map[date] }));
+    setHeatmapData(data);
   }, []);
 
   const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
   const oneYearAgo = new Date();
   oneYearAgo.setFullYear(today.getFullYear() - 1);
+  const todayStr = getTodayStr();
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-6">
       <div className="w-full max-w-md space-y-8">
         
-        {/* タイトル */}
         <div className="text-center space-y-2">
           <h1 className="text-5xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-green-500">
             SQUAT<br/>MASTER
@@ -68,7 +91,6 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
           <p className="text-gray-400 text-sm">Total Squats: <span className="text-white font-bold">{totalCount}</span></p>
         </div>
 
-        {/* ヒートマップ */}
         <div className="bg-gray-800/40 p-3 rounded-xl border border-gray-700 overflow-hidden shadow-2xl">
           <div className="overflow-x-auto">
             <div className="min-w-[500px]">
@@ -77,28 +99,17 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
                 endDate={today}
                 values={heatmapData}
                 classForValue={(value) => {
-                  if (value && value.date === todayStr) {
-                      return `color-scale-${Math.min(value.count > 0 ? 4 : 0, 4)} today-cell`;
+                  if (!value) return 'color-empty';
+                  
+                  // ベースの色クラス
+                  let cls = `color-scale-${Math.min(Math.ceil(value.count / 10), 4)}`;
+                  if (value.count === 0) cls = 'color-empty'; // 0回なら色はなし
+
+                  // ★今日なら「today-cell」を追加（データとして存在するのでここで判定できる！）
+                  if (value.date === todayStr) {
+                      return `${cls} today-cell`;
                   }
-                  if (!value) {
-                       // データがない日が今日の場合
-                       const d = new Date().toISOString().split('T')[0];
-                       // react-calendar-heatmapはvalueがnullの場合日付がわからないので
-                       // ここでは簡易的に今日の日付のセルにクラスを当てるのは難しい
-                       // そのため、transformDayElementで制御するか、
-                       // 必ず今日のエントリをダミー(count:0)で作っておく手法がある。
-                       // 今回はシンプルに「今日データがあれば緑枠」にする。
-                       return `color-empty`;
-                  }
-                  return `color-scale-${Math.min(Math.ceil(value.count / 10), 4)}`;
-                }}
-                transformDayElement={(element, value, index) => {
-                  // 今日の日付なら強制的に today-cell クラスを付与
-                  // (valueがnullでも日付判定するためにtitleを使うハック)
-                  const dateTitle = element?.props?.children?.props?.children || ""; 
-                  // ライブラリの仕様上、直接日付を取るのが難しいので
-                  // ここでは「今日のエントリ（0回でも）」をデータ配列に含める処理をuseEffect側でするのが確実
-                  return element;
+                  return cls;
                 }}
                 titleForValue={(value) => value ? `${value.date}: ${value.count}回` : ''}
               />
@@ -109,7 +120,6 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
           </p>
         </div>
 
-        {/* STARTボタン */}
         <button
           onClick={onStart}
           className="group relative w-full py-6 px-6 bg-green-600 hover:bg-green-500 rounded-2xl shadow-[0_10px_0_rgb(21,128,61)] active:shadow-[0_2px_0_rgb(21,128,61)] active:translate-y-2 transition-all duration-150 overflow-hidden"
@@ -130,7 +140,7 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
 };
 
 // ---------------------------------------------------------
-// 2. 履歴画面 (リストのみ)
+// 2. 履歴画面
 // ---------------------------------------------------------
 const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
@@ -183,7 +193,6 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
 const WorkoutScreen = ({ mode, onSave }: { mode: 'UPPER_BODY' | 'FULL_BODY', onSave: (count: number) => void }) => {
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  
   const logicState = useRef({ isSquatting: false, baselineY: 0, countdown: 3 });
   const [count, setCount] = useState(0);
   const countRef = useRef(0);
@@ -311,7 +320,7 @@ const WorkoutScreen = ({ mode, onSave }: { mode: 'UPPER_BODY' | 'FULL_BODY', onS
 };
 
 // ---------------------------------------------------------
-// 4. メインレイアウト (画面遷移管理)
+// 4. メインレイアウト
 // ---------------------------------------------------------
 export default function Home() {
   const [hasStarted, setHasStarted] = useState(false);
@@ -333,36 +342,21 @@ export default function Home() {
     setRefreshHistory(prev => prev + 1);
   }, [currentMode]);
 
-  // ★スタートしていない時は StartScreen を表示
-  if (!hasStarted) {
-    return <StartScreen onStart={() => setHasStarted(true)} />;
-  }
+  if (!hasStarted) return <StartScreen onStart={() => setHasStarted(true)} />;
 
-  // ★スタート後は タブ画面を表示
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
       <div className="flex-1 relative overflow-hidden">
         {currentMode === 'HISTORY' ? (
           <HistoryScreen onDelete={() => setRefreshHistory(prev => prev + 1)} />
         ) : (
-          <WorkoutScreen 
-            key={currentMode} 
-            mode={currentMode === 'UPPER_BODY' ? 'UPPER_BODY' : 'FULL_BODY'} 
-            onSave={handleSaveSession} 
-          />
+          <WorkoutScreen key={currentMode} mode={currentMode === 'UPPER_BODY' ? 'UPPER_BODY' : 'FULL_BODY'} onSave={handleSaveSession} />
         )}
       </div>
-
       <div className="h-20 bg-gray-900 border-t border-gray-800 flex justify-around items-center px-2 pb-2">
-        <button onClick={() => setCurrentMode('UPPER_BODY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'UPPER_BODY' ? 'text-blue-400' : 'text-gray-500'}`}>
-          <span className="text-2xl">👤</span><span className="text-xs font-bold">上半身(肩)</span>
-        </button>
-        <button onClick={() => setCurrentMode('FULL_BODY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'FULL_BODY' ? 'text-green-400' : 'text-gray-500'}`}>
-          <span className="text-2xl">🦵</span><span className="text-xs font-bold">全身(膝)</span>
-        </button>
-        <button onClick={() => setCurrentMode('HISTORY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'HISTORY' ? 'text-yellow-400' : 'text-gray-500'}`}>
-          <span className="text-2xl">📊</span><span className="text-xs font-bold">履歴/編集</span>
-        </button>
+        <button onClick={() => setCurrentMode('UPPER_BODY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'UPPER_BODY' ? 'text-blue-400' : 'text-gray-500'}`}><span className="text-2xl">👤</span><span className="text-xs font-bold">上半身(肩)</span></button>
+        <button onClick={() => setCurrentMode('FULL_BODY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'FULL_BODY' ? 'text-green-400' : 'text-gray-500'}`}><span className="text-2xl">🦵</span><span className="text-xs font-bold">全身(膝)</span></button>
+        <button onClick={() => setCurrentMode('HISTORY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'HISTORY' ? 'text-yellow-400' : 'text-gray-500'}`}><span className="text-2xl">📊</span><span className="text-xs font-bold">履歴/編集</span></button>
       </div>
       <div className="absolute top-0 right-0 p-1 pointer-events-none z-50"><span className="text-[10px] text-gray-600 font-mono">{APP_VERSION}</span></div>
     </div>

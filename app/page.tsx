@@ -54,7 +54,6 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
     // ヒートマップデータ作成
     const map: {[key: string]: number} = {};
     parsed.forEach(s => {
-      // 保存されたISO文字列をローカル日付に変換して集計
       const d = new Date(s.date);
       const year = d.getFullYear();
       const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -65,7 +64,7 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
     });
 
     // ★修正ポイント：今日の日付がマップになければ、0回として追加する
-    // これにより、今日の枠が必ずヒートマップに渡されるようになる
+    // これにより、エラーの原因だった transformDayElement を使わずに済む
     const todayStr = getTodayStr();
     if (map[todayStr] === undefined) {
       map[todayStr] = 0;
@@ -101,11 +100,10 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
                 classForValue={(value) => {
                   if (!value) return 'color-empty';
                   
-                  // ベースの色クラス
                   let cls = `color-scale-${Math.min(Math.ceil(value.count / 10), 4)}`;
-                  if (value.count === 0) cls = 'color-empty'; // 0回なら色はなし
+                  if (value.count === 0) cls = 'color-empty';
 
-                  // ★今日なら「today-cell」を追加（データとして存在するのでここで判定できる！）
+                  // ★今日なら「today-cell」を追加
                   if (value.date === todayStr) {
                       return `${cls} today-cell`;
                   }

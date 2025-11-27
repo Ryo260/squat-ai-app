@@ -6,7 +6,7 @@ import Webcam from 'react-webcam';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 
-const APP_VERSION = "v0.1.4 (Build Fix)";
+const APP_VERSION = "v0.1.5 (100Days & Nav)";
 
 // ---------------------------------------------------------
 // 型定義 & ユーティリティ
@@ -28,13 +28,13 @@ const calculateAngle = (a: any, b: any, c: any) => {
 };
 
 // ---------------------------------------------------------
-// 1. スタート画面 (ヒートマップ搭載)
+// 1. スタート画面
 // ---------------------------------------------------------
 const StartScreen = ({ onStart }: { onStart: () => void }) => {
   const [heatmapData, setHeatmapData] = useState<{date: string, count: number}[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const scrollContainerRef = useRef<HTMLDivElement>(null); // スクロール制御用
 
-  // 日付文字列を取得する関数 (ローカルタイム)
   const getTodayStr = () => {
     const d = new Date();
     const year = d.getFullYear();
@@ -51,7 +51,6 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
       setTotalCount(parsed.reduce((sum, s) => sum + s.count, 0));
     }
 
-    // ヒートマップデータ作成
     const map: {[key: string]: number} = {};
     parsed.forEach(s => {
       const d = new Date(s.date);
@@ -59,12 +58,9 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
       const month = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
       const dateStr = `${year}-${month}-${day}`;
-      
       map[dateStr] = (map[dateStr] || 0) + s.count;
     });
 
-    // ★修正ポイント：今日の日付がマップになければ、0回として追加する
-    // これにより、エラーの原因だった transformDayElement を使わずに済む
     const todayStr = getTodayStr();
     if (map[todayStr] === undefined) {
       map[todayStr] = 0;
@@ -72,17 +68,23 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
 
     const data = Object.keys(map).map(date => ({ date, count: map[date] }));
     setHeatmapData(data);
+
+    // ★修正ポイント：描画後に右端（今日）へ自動スクロール
+    setTimeout(() => {
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollLeft = scrollContainerRef.current.scrollWidth;
+      }
+    }, 100);
   }, []);
 
   const today = new Date();
-  const oneYearAgo = new Date();
-  oneYearAgo.setFullYear(today.getFullYear() - 1);
+  const startDate = new Date();
+  startDate.setDate(today.getDate() - 100); // ★100日前から表示
   const todayStr = getTodayStr();
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-6">
       <div className="w-full max-w-md space-y-8">
-        
         <div className="text-center space-y-2">
           <h1 className="text-5xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-green-500">
             SQUAT<br/>MASTER
@@ -91,19 +93,17 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
         </div>
 
         <div className="bg-gray-800/40 p-3 rounded-xl border border-gray-700 overflow-hidden shadow-2xl">
-          <div className="overflow-x-auto">
+          {/* ★refを追加してスクロール制御 */}
+          <div className="overflow-x-auto" ref={scrollContainerRef}>
             <div className="min-w-[500px]">
               <CalendarHeatmap
-                startDate={oneYearAgo}
+                startDate={startDate}
                 endDate={today}
                 values={heatmapData}
                 classForValue={(value) => {
                   if (!value) return 'color-empty';
-                  
                   let cls = `color-scale-${Math.min(Math.ceil(value.count / 10), 4)}`;
                   if (value.count === 0) cls = 'color-empty';
-
-                  // ★今日なら「today-cell」を追加
                   if (value.date === todayStr) {
                       return `${cls} today-cell`;
                   }
@@ -159,8 +159,9 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
     onDelete();
   };
 
+  // ★上部に余白を追加 (pt-16)
   return (
-    <div className="flex flex-col h-full bg-gray-900 text-white p-4 overflow-y-auto">
+    <div className="flex flex-col h-full bg-gray-900 text-white p-4 pt-16 overflow-y-auto">
       <h2 className="text-xl font-bold mb-4 text-center">History Log</h2>
       <div className="space-y-2 pb-20">
         {sessions.length === 0 && <p className="text-center text-gray-500 py-10">記録なし</p>}
@@ -309,8 +310,11 @@ const WorkoutScreen = ({ mode, onSave }: { mode: 'UPPER_BODY' | 'FULL_BODY', onS
         {!isModelReady && <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20"><p className="text-yellow-400 font-bold animate-pulse">SYSTEM LOADING...</p></div>}
         {countdownDisplay !== null && <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-30"><p className="text-9xl font-black text-white animate-ping">{countdownDisplay}</p></div>}
         {statusMessage && <div className="absolute top-1/2 left-0 w-full text-center z-30 transform -translate-y-1/2"><p className="text-6xl font-black text-yellow-400 drop-shadow-lg">{statusMessage}</p></div>}
-        <div className="absolute top-4 left-4 bg-gray-900/80 p-4 rounded-xl backdrop-blur-md border border-gray-700 z-10"><p className="text-xs text-gray-400 mb-1">COUNT</p><p className="text-6xl font-bold text-yellow-400 leading-none font-mono">{count}</p></div>
-        <div className="absolute top-4 right-4 bg-blue-900/80 px-3 py-1 rounded-full backdrop-blur-md border border-blue-500 z-10"><p className="text-xs font-bold text-blue-200">{mode === 'UPPER_BODY' ? '上半身' : '全身'}</p></div>
+        
+        {/* ★COUNT表示を少し下に移動 (top-16) */}
+        <div className="absolute top-16 left-4 bg-gray-900/80 p-4 rounded-xl backdrop-blur-md border border-gray-700 z-10"><p className="text-xs text-gray-400 mb-1">COUNT</p><p className="text-6xl font-bold text-yellow-400 leading-none font-mono">{count}</p></div>
+        
+        <div className="absolute top-16 right-4 bg-blue-900/80 px-3 py-1 rounded-full backdrop-blur-md border border-blue-500 z-10"><p className="text-xs font-bold text-blue-200">{mode === 'UPPER_BODY' ? '上半身' : '全身'}</p></div>
         {mode === 'UPPER_BODY' && countdownDisplay === null && <button onClick={handleReset} className="absolute bottom-4 right-4 bg-gray-800/80 hover:bg-gray-700 text-white px-4 py-2 rounded-full text-xs font-bold border border-gray-600 z-40 shadow-lg">↻ 位置リセット</button>}
       </div>
     </div>
@@ -340,10 +344,25 @@ export default function Home() {
     setRefreshHistory(prev => prev + 1);
   }, [currentMode]);
 
+  // ★ロゴボタンでトップに戻る関数
+  const goHome = () => {
+    if(confirm("トップ画面に戻りますか？\n(現在のカウントは保存されません)")) {
+      setHasStarted(false);
+    }
+  };
+
   if (!hasStarted) return <StartScreen onStart={() => setHasStarted(true)} />;
 
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
+      {/* ★左上のロゴボタン (押すとトップへ) */}
+      <button 
+        onClick={goHome}
+        className="absolute top-4 left-4 z-50 flex flex-col items-start leading-none group active:scale-95 transition"
+      >
+        <span className="font-black italic text-lg text-yellow-400 tracking-tighter group-hover:text-green-400 transition-colors">SQUAT<br/>MASTER</span>
+      </button>
+
       <div className="flex-1 relative overflow-hidden">
         {currentMode === 'HISTORY' ? (
           <HistoryScreen onDelete={() => setRefreshHistory(prev => prev + 1)} />

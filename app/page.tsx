@@ -6,7 +6,7 @@ import Webcam from 'react-webcam';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 
-const APP_VERSION = "v0.1.7 (Push-up Mode)";
+const APP_VERSION = "v0.2.0 (Push-up & Pause)";
 
 // ---------------------------------------------------------
 // 型定義 & ユーティリティ
@@ -17,7 +17,7 @@ type SquatSubMode = 'UPPER' | 'FULL';
 interface WorkoutSession {
   id: string;
   date: string;
-  mode: SquatSubMode | 'PUSHUP';
+  mode: 'UPPER' | 'FULL' | 'PUSHUP'; // 互換性のためUPPER/FULLは残しつつPUSHUP追加
   count: number;
 }
 
@@ -29,10 +29,10 @@ const calculateAngle = (a: any, b: any, c: any) => {
 };
 
 // ---------------------------------------------------------
-// 1. スタート画面
+// 1. スタート画面 (ヒートマップ)
 // ---------------------------------------------------------
 const StartScreen = ({ onStart }: { onStart: () => void }) => {
-  const [heatmapData, setHeatmapData] = useState<{date: string, count: number}[]>([]);
+  const [heatmapData, setHeatmapData] = useState<{date: string, count: number, status: string}[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -49,26 +49,51 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
     let parsed: WorkoutSession[] = [];
     if (saved) {
       parsed = JSON.parse(saved);
+      parsed.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       setTotalCount(parsed.reduce((sum, s) => sum + s.count, 0));
     }
 
-    const map: {[key: string]: number} = {};
+    const workoutMap: {[key: string]: number} = {};
+    let firstWorkoutDateStr = "";
+
     parsed.forEach(s => {
       const d = new Date(s.date);
-      const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      const dateStr = `${year}-${month}-${day}`;
-      map[dateStr] = (map[dateStr] || 0) + s.count;
+      const dateStr = d.toISOString().split('T')[0];
+      workoutMap[dateStr] = (workoutMap[dateStr] || 0) + s.count;
+      if (firstWorkoutDateStr === "") firstWorkoutDateStr = dateStr;
     });
 
-    const todayStr = getTodayStr();
-    if (map[todayStr] === undefined) {
-      map[todayStr] = 0;
+    const today = new Date();
+    const tempDate = new Date();
+    tempDate.setDate(today.getDate() - 100);
+
+    const dataArray = [];
+    let lastWorkoutDaysAgo = -1;
+
+    while (tempDate <= today) {
+      const dateStr = tempDate.toISOString().split('T')[0];
+      const count = workoutMap[dateStr] || 0;
+      let status = 'empty';
+
+      if (firstWorkoutDateStr && dateStr >= firstWorkoutDateStr) {
+        if (count > 0) {
+          status = 'workout';
+          lastWorkoutDaysAgo = 0;
+        } else {
+          if (lastWorkoutDaysAgo >= 0) {
+            lastWorkoutDaysAgo++;
+            if (lastWorkoutDaysAgo === 1) status = 'rest-1';
+            else if (lastWorkoutDaysAgo === 2) status = 'rest-2';
+            else if (lastWorkoutDaysAgo === 3) status = 'rest-3';
+            else status = 'warning';
+          }
+        }
+      }
+      dataArray.push({ date: dateStr, count, status });
+      tempDate.setDate(tempDate.getDate() + 1);
     }
 
-    const data = Object.keys(map).map(date => ({ date, count: map[date] }));
-    setHeatmapData(data);
+    setHeatmapData(dataArray);
 
     setTimeout(() => {
       if (scrollContainerRef.current) {
@@ -83,16 +108,16 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
   const todayStr = getTodayStr();
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-6">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-6 relative z-10">
       <div className="w-full max-w-md space-y-8">
         <div className="text-center space-y-2">
           <h1 className="text-5xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-green-500">
             SQUAT<br/>MASTER
           </h1>
-          <p className="text-gray-400 text-sm">Total Squats: <span className="text-white font-bold">{totalCount}</span></p>
+          <p className="text-gray-400 text-sm">Total Workouts: <span className="text-white font-bold">{totalCount}</span></p>
         </div>
 
-        <div className="bg-gray-800/40 p-3 rounded-xl border border-gray-700 overflow-hidden shadow-2xl">
+        <div className="bg-gray-800/80 p-3 rounded-xl border border-gray-700 overflow-hidden shadow-2xl backdrop-blur-sm">
           <div className="overflow-x-auto" ref={scrollContainerRef}>
             <div className="min-w-[500px]">
               <CalendarHeatmap
@@ -101,20 +126,19 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
                 values={heatmapData}
                 classForValue={(value) => {
                   if (!value) return 'color-empty';
-                  let cls = `color-scale-${Math.min(Math.ceil(value.count / 10), 4)}`;
-                  if (value.count === 0) cls = 'color-empty';
-                  if (value.date === todayStr) {
-                      return `${cls} today-cell`;
-                  }
+                  let cls = `color-${value.status}`; 
+                  if (value.date === todayStr) return `${cls} today-cell`;
                   return cls;
                 }}
                 titleForValue={(value) => value ? `${value.date}: ${value.count}回` : ''}
               />
             </div>
           </div>
-          <p className="text-center text-[10px] text-gray-500 mt-2">
-             <span className="animate-pulse text-green-400 font-bold">□</span> 今日の枠を埋めよう！
-          </p>
+          <div className="flex justify-center space-x-3 mt-3 text-[10px] text-gray-400">
+             <div className="flex items-center"><span className="w-2 h-2 bg-green-500 rounded-full mr-1"></span>運動</div>
+             <div className="flex items-center"><span className="w-2 h-2 bg-blue-500 rounded-full mr-1"></span>回復</div>
+             <div className="flex items-center"><span className="w-2 h-2 bg-red-500 rounded-full mr-1"></span>警告</div>
+          </div>
         </div>
 
         <button
@@ -128,17 +152,6 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
           <div className="absolute top-0 left-0 w-full h-1/2 bg-white/20 rounded-t-2xl pointer-events-none"></div>
         </button>
 
-        <div className="bg-gray-800/70 border border-gray-700 rounded-2xl p-4 space-y-2 shadow-xl">
-          <div className="flex items-center space-x-2">
-            <span className="text-yellow-300 text-xl">⭐</span>
-            <p className="text-sm font-bold text-white">ホーム画面に追加して即起動！</p>
-          </div>
-          <p className="text-xs text-gray-300 leading-relaxed">
-            iPhone: Safari の共有ボタン →「ホーム画面に追加」／Android: Chrome メニュー →「ホーム画面に追加」
-          </p>
-          <p className="text-[11px] text-gray-500">※PWAとしてインストールするとオフラインでも起動が早くなります。</p>
-        </div>
-
         <div className="text-center pt-8">
           <p className="text-xs text-gray-600 font-mono">{APP_VERSION}</p>
         </div>
@@ -148,57 +161,11 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
 };
 
 // ---------------------------------------------------------
-// 2. 履歴画面 (CSV機能付き)
+// 2. 履歴画面
 // ---------------------------------------------------------
 const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const dailyGraphData = useMemo(() => {
-    const countsByDate: Record<string, number> = {};
-    sessions.forEach((session) => {
-      const date = new Date(session.date);
-      const y = date.getFullYear();
-      const m = String(date.getMonth() + 1).padStart(2, '0');
-      const d = String(date.getDate()).padStart(2, '0');
-      const key = `${y}-${m}-${d}`;
-      countsByDate[key] = (countsByDate[key] || 0) + session.count;
-    });
-    const result: { label: string; key: string; count: number }[] = [];
-    for (let i = 4; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const y = date.getFullYear();
-      const m = String(date.getMonth() + 1).padStart(2, '0');
-      const d = String(date.getDate()).padStart(2, '0');
-      const key = `${y}-${m}-${d}`;
-      result.push({
-        key,
-        label: `${date.getMonth() + 1}/${date.getDate()}`,
-        count: countsByDate[key] || 0,
-      });
-    }
-    return result;
-  }, [sessions]);
-  const maxGraphValue = useMemo(() => {
-    const maxValue = Math.max(...dailyGraphData.map((d) => d.count), 0);
-    return maxValue === 0 ? 1 : maxValue;
-  }, [dailyGraphData]);
-  const groupedSessions = useMemo(() => {
-    const map = new Map<string, { label: string; items: WorkoutSession[]; sortKey: number }>();
-    sessions.forEach((session) => {
-      const d = new Date(session.date);
-      const key = d.toISOString().split('T')[0];
-      const label = d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', weekday: 'short' });
-      if (!map.has(key)) {
-        map.set(key, { label, items: [], sortKey: d.getTime() });
-      }
-      map.get(key)!.items.push(session);
-    });
-    return Array.from(map.values()).sort((a, b) => b.sortKey - a.sortKey).map(group => ({
-      label: group.label,
-      items: group.items.sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime()),
-    }));
-  }, [sessions]);
   
   useEffect(() => {
     const saved = localStorage.getItem('squat_sessions');
@@ -209,7 +176,6 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
     }
   }, [onDelete]);
 
-  // 1行削除
   const handleDelete = (id: string) => {
     if(!confirm('削除しますか？')) return;
     const newSessions = sessions.filter(s => s.id !== id);
@@ -217,184 +183,78 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
     onDelete();
   };
 
-  // ★CSV書き出し
   const handleExport = () => {
-    if (sessions.length === 0) {
-      alert("データがありません");
-      return;
-    }
-    // ヘッダー + データ行
+    if (sessions.length === 0) { alert("データがありません"); return; }
     const header = "id,date,mode,count\n";
     const rows = sessions.map(s => `${s.id},${s.date},${s.mode},${s.count}`).join("\n");
-    const csvContent = header + rows;
-    
-    // ダウンロード発火
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+    const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
-    link.href = url;
-    const today = new Date().toISOString().split('T')[0];
-    link.setAttribute('download', `squat_backup_${today}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute('download', `workout_backup_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  // ★CSV読み込み
-  const handleImportClick = () => {
-    fileInputRef.current?.click();
-  };
-
+  const handleImportClick = () => fileInputRef.current?.click();
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
-        const lines = text.trim().split('\n');
-        // ヘッダーを除外
-        const dataLines = lines.slice(1);
-        
+        const lines = text.trim().split('\n').slice(1);
         const newSessions: WorkoutSession[] = [];
-        dataLines.forEach(line => {
+        lines.forEach(line => {
           const [id, date, mode, countStr] = line.split(',');
-          if (id && date && mode && countStr) {
-            newSessions.push({
-              id,
-              date,
-              mode: mode as SquatSubMode | 'PUSHUP',
-              count: Number(countStr)
-            });
-          }
+          if (id && date && mode && countStr) newSessions.push({ id, date, mode: mode as any, count: Number(countStr) });
         });
-
-        if (newSessions.length === 0) {
-          alert("有効なデータが見つかりませんでした");
-          return;
-        }
-
-        // 既存データとマージ（ID重複チェック）
+        if (newSessions.length === 0) { alert("データなし"); return; }
         const currentSaved = localStorage.getItem('squat_sessions');
         let currentSessions: WorkoutSession[] = currentSaved ? JSON.parse(currentSaved) : [];
-        
-        // IDが既に存在する場合はスキップ、新しいものだけ追加
-        let addedCount = 0;
+        let added = 0;
         newSessions.forEach(newS => {
-          if (!currentSessions.some(curr => curr.id === newS.id)) {
-            currentSessions.push(newS);
-            addedCount++;
-          }
+          if (!currentSessions.some(curr => curr.id === newS.id)) { currentSessions.push(newS); added++; }
         });
-
-        if (addedCount > 0) {
-          localStorage.setItem('squat_sessions', JSON.stringify(currentSessions));
-          alert(`${addedCount}件のデータを復元しました！`);
-          onDelete(); // 再読み込み
-        } else {
-          alert("新しいデータはありませんでした（全て重複済み）");
-        }
-      } catch (err) {
-        alert("ファイルの読み込みに失敗しました");
-        console.error(err);
-      }
+        if (added > 0) { localStorage.setItem('squat_sessions', JSON.stringify(currentSessions)); alert(`${added}件復元しました`); onDelete(); }
+        else { alert("新しいデータはありません"); }
+      } catch (err) { alert("読込失敗"); }
     };
     reader.readAsText(file);
-    // inputをリセット
     e.target.value = '';
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 text-white p-4 pt-16 overflow-y-auto">
+    <div className="flex flex-col h-full bg-gray-900 text-white p-4 pt-16 overflow-y-auto relative z-10">
       <h2 className="text-xl font-bold mb-4 text-center">History Log</h2>
-
-      <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 mb-6 shadow-lg">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-sm font-bold text-white">直近5日間の記録</p>
-          <span className="text-[11px] text-gray-400">日別合計</span>
-        </div>
-        <div className="space-y-3">
-          {dailyGraphData.map((day) => (
-            <div key={day.key} className="flex items-center space-x-3">
-              <span className="text-xs text-gray-300 w-12 text-right">{day.label}</span>
-              <div className="flex-1 h-3 bg-gray-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-green-400 to-green-600 transition-all duration-300"
-                  style={{ width: `${(day.count / maxGraphValue) * 100}%` }}
-                ></div>
-              </div>
-              <span className="text-xs font-bold text-white w-8 text-right">{day.count}</span>
-            </div>
-          ))}
-        </div>
+      <div className="flex justify-center space-x-4 mb-6">
+        <button onClick={handleExport} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center shadow-lg active:scale-95 transition">📤 バックアップ</button>
+        <button onClick={handleImportClick} className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center shadow-lg active:scale-95 transition">📥 復元</button>
+        <input type="file" accept=".csv" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
       </div>
-
-      <div className="space-y-2 pb-20">
+      <div className="space-y-2 pb-24">
         {sessions.length === 0 && <p className="text-center text-gray-500 py-10">記録なし</p>}
-        {groupedSessions.map(group => (
-          <div key={group.label} className="bg-gray-800/60 border border-gray-700 rounded-2xl p-4 space-y-3 shadow-lg">
-            <div className="flex items-center justify-between text-xs text-gray-400 uppercase tracking-widest">
-              <span>{group.label}</span>
-              <span>{group.items.reduce((sum, s) => sum + s.count, 0)} 回</span>
-            </div>
-            <div className="space-y-2">
-              {group.items.map(session => {
-                const isPushup = session.mode === 'PUSHUP';
-                const badgeClass = isPushup
-                  ? 'bg-orange-900 text-orange-200 border border-orange-500/40'
-                  : session.mode === 'FULL'
-                    ? 'bg-green-900 text-green-200 border border-green-500/30'
-                    : 'bg-blue-900 text-blue-200 border border-blue-500/30';
-                const badgeLabel = isPushup ? '腕立て' : session.mode === 'FULL' ? '全身' : '上半身';
-                const icon = isPushup ? '💪' : session.mode === 'FULL' ? '🦵' : '👤';
-                return (
-                  <div key={session.id} className="flex items-center justify-between bg-gray-900/60 rounded-xl px-3 py-2 border border-gray-700/60">
-                    <div className="flex items-center space-x-3">
-                      <div className="text-lg">{icon}</div>
-                      <div>
-                        <p className="text-[11px] text-gray-400">
-                          {new Date(session.date).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                        <div className="flex items-center space-x-2">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${badgeClass}`}>{badgeLabel}</span>
-                          <span className="font-bold">{session.count} 回</span>
-                        </div>
-                      </div>
-                    </div>
-                    <button onClick={() => handleDelete(session.id)} className="text-red-400 hover:text-red-200 text-lg transition">✕</button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
+        {sessions.map((session) => {
+            const isPushup = session.mode === 'PUSHUP';
+            const isSquat = session.mode === 'UPPER' || session.mode === 'FULL';
+            const bgColor = isPushup ? 'bg-orange-900/30 border-orange-700' : 'bg-blue-900/30 border-blue-700';
+            const textColor = isPushup ? 'text-orange-300' : 'text-blue-300';
+            const icon = isPushup ? '💪' : '🦵';
+            const label = isPushup ? '腕立て' : (session.mode === 'UPPER' ? 'スクワット(肩)' : 'スクワット(膝)');
 
-      {/* ★CSVボタンエリア（ページ最下部） */}
-      <div className="mt-auto pt-4">
-        <div className="flex justify-center space-x-4">
-          <button 
-            onClick={handleExport}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center shadow-lg active:scale-95 transition"
-          >
-            📤 バックアップ(CSV)
-          </button>
-          <button 
-            onClick={handleImportClick}
-            className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center shadow-lg active:scale-95 transition"
-          >
-            📥 復元(CSV)
-          </button>
-        </div>
-        {/* 隠しinput */}
-        <input 
-          type="file" 
-          accept=".csv" 
-          ref={fileInputRef} 
-          onChange={handleFileChange} 
-          className="hidden" 
-        />
+            return (
+              <div key={session.id} className={`p-3 rounded-lg flex justify-between items-center shadow-sm border ${bgColor}`}>
+                <div>
+                  <p className="text-xs text-gray-400">{new Date(session.date).toLocaleString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                  <div className="flex items-center space-x-2 mt-1">
+                    <span className="text-lg">{icon}</span>
+                    <span className={`text-xs font-bold ${textColor}`}>{label}</span>
+                    <span className="font-bold text-lg ml-2">{session.count} 回</span>
+                  </div>
+                </div>
+                <button onClick={() => handleDelete(session.id)} className="bg-red-900/20 text-red-400 p-2 rounded-full hover:bg-red-900/40 transition">🗑️</button>
+              </div>
+            );
+        })}
       </div>
     </div>
   );
@@ -403,40 +263,34 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
 // ---------------------------------------------------------
 // 3. トレーニング画面
 // ---------------------------------------------------------
-const WorkoutScreen = ({
-  mode,
-  squatSubMode,
-  onChangeSquatSubMode,
-  onSave,
-  videoRef,
-  isCameraReady,
-}: {
-  mode: 'SQUAT' | 'PUSHUP',
-  squatSubMode?: SquatSubMode,
-  onChangeSquatSubMode?: (next: SquatSubMode) => void,
-  onSave: (count: number) => void,
-  videoRef: React.MutableRefObject<HTMLVideoElement | null>,
-  isCameraReady: boolean,
-}) => {
+const WorkoutScreen = ({ mode, onSave, videoRef }: { mode: 'SQUAT' | 'PUSHUP', onSave: (count: number, modeStr: string) => void, videoRef: React.RefObject<HTMLVideoElement> }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const logicState = useRef({ isLowered: false, baselineY: 0, countdown: 3 });
+  
+  // スクワットのサブモード（肩/膝）
+  const [squatSubMode, setSquatSubMode] = useState<SquatSubMode>('UPPER');
+  const [isPaused, setIsPaused] = useState(false);
+
+  const logicState = useRef({ isSquatting: false, baselineY: 0, countdown: 3 });
   const [count, setCount] = useState(0);
   const countRef = useRef(0);
   const [countdownDisplay, setCountdownDisplay] = useState<number | null>(null);
   const [isModelReady, setIsModelReady] = useState(false);
-  const [statusMessage, setStatusMessage] = useState("準備中...");
-  const [isPaused, setIsPaused] = useState(false);
-  const isPausedRef = useRef(false);
+  const [statusMessage, setStatusMessage] = useState("AI準備中...");
 
   useEffect(() => { countRef.current = count; }, [count]);
-  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  
+  // 保存時は現在のモードを詳しく伝える
   useEffect(() => {
     return () => {
-      if (countRef.current > 0) onSave(countRef.current);
+      if (countRef.current > 0) {
+          const modeStr = mode === 'PUSHUP' ? 'PUSHUP' : squatSubMode;
+          onSave(countRef.current, modeStr);
+      }
     };
-  }, [onSave]);
+  }, [onSave, mode, squatSubMode]);
 
-  const handleReset = () => {
+  const handleReset = (e: React.MouseEvent) => {
+    e.stopPropagation(); // 画面タップの一時停止を防ぐ
     logicState.current.countdown = 3;
     setCountdownDisplay(3);
     const timer = setInterval(() => {
@@ -446,10 +300,17 @@ const WorkoutScreen = ({
     }, 1000);
   };
 
-  const togglePause = () => setIsPaused(prev => !prev);
+  const togglePause = () => {
+      setIsPaused(prev => !prev);
+  };
+
+  const toggleSubMode = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setSquatSubMode(prev => prev === 'UPPER' ? 'FULL' : 'UPPER');
+  };
 
   useEffect(() => {
-    if (isCameraReady && isModelReady && logicState.current.countdown > 0 && countdownDisplay === null) {
+    if (isModelReady && logicState.current.countdown > 0 && countdownDisplay === null) {
       setCountdownDisplay(3);
       const timer = setInterval(() => {
         logicState.current.countdown -= 1;
@@ -458,24 +319,27 @@ const WorkoutScreen = ({
       }, 1000);
       return () => clearInterval(timer);
     }
-  }, [isCameraReady, isModelReady, countdownDisplay]);
+  }, [isModelReady]);
 
+  // AIループ
   useEffect(() => {
-    if (!videoRef.current || !isCameraReady) return;
-
     let pose: any = null;
-    let animationId: number | null = null;
-    let isActive = true;
+    let animationFrameId: number;
 
     const onResults = (results: any) => {
-      if (!canvasRef.current) return;
-      const ctx = canvasRef.current.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return;
+      if (!canvasRef.current || !videoRef.current) return;
+      
+      // 一時停止中は処理しない（Canvas更新もしない＝止まった絵になる）
+      if (isPaused) return;
 
-      const videoWidth = videoRef.current?.videoWidth || results.image.width;
-      const videoHeight = videoRef.current?.videoHeight || results.image.height;
+      const videoWidth = videoRef.current.videoWidth;
+      const videoHeight = videoRef.current.videoHeight;
+      if (videoWidth === 0) return;
+
       canvasRef.current.width = videoWidth;
       canvasRef.current.height = videoHeight;
+      const ctx = canvasRef.current.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return;
 
       ctx.save();
       ctx.clearRect(0, 0, videoWidth, videoHeight);
@@ -483,262 +347,299 @@ const WorkoutScreen = ({
       ctx.scale(-1, 1);
       ctx.drawImage(results.image, 0, 0, videoWidth, videoHeight);
 
-      if (isPausedRef.current) {
-        ctx.restore();
-        return;
-      }
-
       if (logicState.current.countdown > 0) {
-        if (results.poseLandmarks) {
-          const leftShoulder = results.poseLandmarks[11];
-          const rightShoulder = results.poseLandmarks[12];
-          if (leftShoulder && rightShoulder) logicState.current.baselineY = (leftShoulder.y + rightShoulder.y) / 2;
-        }
-        ctx.strokeStyle = "yellow"; ctx.lineWidth = 2; ctx.beginPath();
-        ctx.moveTo(0, logicState.current.baselineY * videoHeight); ctx.lineTo(videoWidth, logicState.current.baselineY * videoHeight); ctx.stroke();
-        ctx.restore();
-        return;
+          if (mode === 'SQUAT' && squatSubMode === 'UPPER' && results.poseLandmarks) {
+              const leftShoulder = results.poseLandmarks[11];
+              const rightShoulder = results.poseLandmarks[12];
+              if (leftShoulder && rightShoulder) logicState.current.baselineY = (leftShoulder.y + rightShoulder.y) / 2;
+          }
+          if (mode === 'SQUAT' && squatSubMode === 'UPPER') {
+            ctx.strokeStyle = "yellow"; ctx.lineWidth = 2; ctx.beginPath();
+            ctx.moveTo(0, logicState.current.baselineY * videoHeight); ctx.lineTo(videoWidth, logicState.current.baselineY * videoHeight); ctx.stroke();
+          }
+          ctx.restore(); return;
       }
 
       if (results.poseLandmarks) {
-        if (mode === 'SQUAT' && squatSubMode === 'UPPER') {
-          const leftShoulder = results.poseLandmarks[11]; const rightShoulder = results.poseLandmarks[12];
-          if (leftShoulder && rightShoulder) {
-            const currentY = (leftShoulder.y + rightShoulder.y) / 2;
-            const baselineYPx = logicState.current.baselineY * videoHeight;
-            ctx.beginPath(); ctx.moveTo(0, baselineYPx); ctx.lineTo(videoWidth, baselineYPx); ctx.strokeStyle = "rgba(0,255,255,0.8)"; ctx.lineWidth = 2; ctx.stroke();
-            ctx.fillStyle = "#00FFFF"; ctx.beginPath(); ctx.arc(leftShoulder.x * videoWidth, leftShoulder.y * videoHeight, 8, 0, 2 * Math.PI); ctx.arc(rightShoulder.x * videoWidth, rightShoulder.y * videoHeight, 8, 0, 2 * Math.PI); ctx.fill();
-            if (currentY > logicState.current.baselineY + 0.1) { if (!logicState.current.isLowered) logicState.current.isLowered = true; } 
-            else if (currentY < logicState.current.baselineY + 0.03) { if (logicState.current.isLowered) { logicState.current.isLowered = false; setCount(c => c + 1); } }
-          }
-        } else if (mode === 'SQUAT' && squatSubMode === 'FULL') {
-          const leftHip = results.poseLandmarks[23]; const leftKnee = results.poseLandmarks[25]; const leftAnkle = results.poseLandmarks[27];
-          const rightHip = results.poseLandmarks[24]; const rightKnee = results.poseLandmarks[26]; const rightAnkle = results.poseLandmarks[28];
-          const leftScore = (leftHip?.visibility || 0) + (leftKnee?.visibility || 0) + (leftAnkle?.visibility || 0);
-          const rightScore = (rightHip?.visibility || 0) + (rightKnee?.visibility || 0) + (rightAnkle?.visibility || 0);
-          let tHip, tKnee, tAnkle;
-          if (leftScore > rightScore) { tHip = leftHip; tKnee = leftKnee; tAnkle = leftAnkle; } else { tHip = rightHip; tKnee = rightKnee; tAnkle = rightAnkle; }
-          if (tHip && tKnee && tAnkle) {
-            const angle = calculateAngle(tHip, tKnee, tAnkle);
-            ctx.beginPath(); ctx.moveTo(tHip.x * videoWidth, tHip.y * videoHeight); ctx.lineTo(tKnee.x * videoWidth, tKnee.y * videoHeight); ctx.lineTo(tAnkle.x * videoWidth, tAnkle.y * videoHeight);
-            ctx.lineWidth = 4; ctx.strokeStyle = "#00FF00"; ctx.stroke();
-            if (angle < 100) { if (!logicState.current.isLowered) logicState.current.isLowered = true; } 
-            else if (angle > 160) { if (logicState.current.isLowered) { logicState.current.isLowered = false; setCount(c => c + 1); } }
-          }
-        } else if (mode === 'PUSHUP') {
-          const leftShoulder = results.poseLandmarks[11]; const leftElbow = results.poseLandmarks[13]; const leftWrist = results.poseLandmarks[15];
-          const rightShoulder = results.poseLandmarks[12]; const rightElbow = results.poseLandmarks[14]; const rightWrist = results.poseLandmarks[16];
-          const leftScore = (leftShoulder?.visibility || 0) + (leftElbow?.visibility || 0) + (leftWrist?.visibility || 0);
-          const rightScore = (rightShoulder?.visibility || 0) + (rightElbow?.visibility || 0) + (rightWrist?.visibility || 0);
-          const useLeft = leftScore >= rightScore;
-          const targetShoulder = useLeft ? leftShoulder : rightShoulder;
-          const targetElbow = useLeft ? leftElbow : rightElbow;
-          const targetWrist = useLeft ? leftWrist : rightWrist;
-          if (targetShoulder && targetElbow && targetWrist) {
-            const angle = calculateAngle(targetShoulder, targetElbow, targetWrist);
-            ctx.beginPath(); ctx.moveTo(targetShoulder.x * videoWidth, targetShoulder.y * videoHeight); ctx.lineTo(targetElbow.x * videoWidth, targetElbow.y * videoHeight); ctx.lineTo(targetWrist.x * videoWidth, targetWrist.y * videoHeight);
-            ctx.lineWidth = 4; ctx.strokeStyle = "#FFA500"; ctx.stroke();
-            ctx.fillStyle = "#FF7A18"; ctx.beginPath(); ctx.arc(targetElbow.x * videoWidth, targetElbow.y * videoHeight, 10, 0, 2 * Math.PI); ctx.fill();
-            if (angle <= 90) { if (!logicState.current.isLowered) logicState.current.isLowered = true; }
-            else if (angle >= 160) { if (logicState.current.isLowered) { logicState.current.isLowered = false; setCount(c => c + 1); } }
-          }
+        // ==========================================
+        // 1. 腕立て伏せモード (PUSHUP)
+        // ==========================================
+        if (mode === 'PUSHUP') {
+            // 右側の腕（12:肩, 14:肘, 16:手首）を使う（または左）
+            // 信頼度が高い方を使うのがベストだが、今回は簡易的に右側優先で、なければ左
+            const rShoulder = results.poseLandmarks[12];
+            const rElbow = results.poseLandmarks[14];
+            const rWrist = results.poseLandmarks[16];
+            const lShoulder = results.poseLandmarks[11];
+            const lElbow = results.poseLandmarks[13];
+            const lWrist = results.poseLandmarks[15];
+
+            let targetS, targetE, targetW;
+            // 右腕が見えていれば右、そうでなければ左
+            if (rShoulder && rElbow && rWrist && rElbow.visibility > 0.5) {
+                targetS = rShoulder; targetE = rElbow; targetW = rWrist;
+            } else {
+                targetS = lShoulder; targetE = lElbow; targetW = lWrist;
+            }
+
+            if (targetS && targetE && targetW) {
+                const elbowAngle = calculateAngle(targetS, targetE, targetW);
+                
+                // 描画
+                ctx.beginPath();
+                ctx.moveTo(targetS.x * videoWidth, targetS.y * videoHeight);
+                ctx.lineTo(targetE.x * videoWidth, targetE.y * videoHeight);
+                ctx.lineTo(targetW.x * videoWidth, targetW.y * videoHeight);
+                ctx.lineWidth = 4; ctx.strokeStyle = "#FFA500"; ctx.stroke(); // オレンジ
+
+                // ロジック: 160度以上でUP、90度以下でDOWN
+                if (elbowAngle < 90) {
+                    if (!logicState.current.isSquatting) logicState.current.isSquatting = true; // Down状態
+                } else if (elbowAngle > 160) {
+                    if (logicState.current.isSquatting) {
+                        logicState.current.isSquatting = false; // Upに戻った
+                        setCount(c => c + 1);
+                    }
+                }
+            }
+        }
+        // ==========================================
+        // 2. スクワットモード (SQUAT)
+        // ==========================================
+        else {
+            if (squatSubMode === 'UPPER') {
+                // 上半身モード（肩の高さ）
+                const leftShoulder = results.poseLandmarks[11]; const rightShoulder = results.poseLandmarks[12];
+                if (leftShoulder && rightShoulder) {
+                    const currentY = (leftShoulder.y + rightShoulder.y) / 2;
+                    const baselineYPx = logicState.current.baselineY * videoHeight;
+                    ctx.beginPath(); ctx.moveTo(0, baselineYPx); ctx.lineTo(videoWidth, baselineYPx); ctx.strokeStyle = "rgba(0,255,255,0.8)"; ctx.lineWidth = 2; ctx.stroke();
+                    ctx.fillStyle = "#00FFFF"; ctx.beginPath(); ctx.arc(leftShoulder.x * videoWidth, leftShoulder.y * videoHeight, 8, 0, 2 * Math.PI); ctx.arc(rightShoulder.x * videoWidth, rightShoulder.y * videoHeight, 8, 0, 2 * Math.PI); ctx.fill();
+                    if (currentY > logicState.current.baselineY + 0.1) { if (!logicState.current.isSquatting) logicState.current.isSquatting = true; } 
+                    else if (currentY < logicState.current.baselineY + 0.03) { if (logicState.current.isSquatting) { logicState.current.isSquatting = false; setCount(c => c + 1); } }
+                }
+            } else {
+                // 全身モード（膝の角度）
+                const leftHip = results.poseLandmarks[23]; const leftKnee = results.poseLandmarks[25]; const leftAnkle = results.poseLandmarks[27];
+                const rightHip = results.poseLandmarks[24]; const rightKnee = results.poseLandmarks[26]; const rightAnkle = results.poseLandmarks[28];
+                // ... (いつもの全身判定)
+                const leftScore = (leftHip?.visibility || 0) + (leftKnee?.visibility || 0) + (leftAnkle?.visibility || 0);
+                const rightScore = (rightHip?.visibility || 0) + (rightKnee?.visibility || 0) + (rightAnkle?.visibility || 0);
+                let tHip, tKnee, tAnkle;
+                if (leftScore > rightScore) { tHip = leftHip; tKnee = leftKnee; tAnkle = leftAnkle; } else { tHip = rightHip; tKnee = rightKnee; tAnkle = rightAnkle; }
+                if (tHip && tKnee && tAnkle) {
+                    const angle = calculateAngle(tHip, tKnee, tAnkle);
+                    ctx.beginPath(); ctx.moveTo(tHip.x * videoWidth, tHip.y * videoHeight); ctx.lineTo(tKnee.x * videoWidth, tKnee.y * videoHeight); ctx.lineTo(tAnkle.x * videoWidth, tAnkle.y * videoHeight);
+                    ctx.lineWidth = 4; ctx.strokeStyle = "#00FF00"; ctx.stroke();
+                    if (angle < 100) { if (!logicState.current.isSquatting) logicState.current.isSquatting = true; } 
+                    else if (angle > 160) { if (logicState.current.isSquatting) { logicState.current.isSquatting = false; setCount(c => c + 1); } }
+                }
+            }
         }
       }
       ctx.restore();
     };
 
-    const processFrame = async () => {
-      if (!pose || !videoRef.current || !isActive) return;
-      await pose.send({ image: videoRef.current });
-      animationId = requestAnimationFrame(processFrame);
-    };
-
     const loadMediaPipe = async () => {
       try {
-        setIsModelReady(false);
         const poseModule = await import('@mediapipe/pose');
         pose = new poseModule.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
         pose.setOptions({ modelComplexity: 0, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
         pose.onResults(onResults);
+        
         setIsModelReady(true);
-        processFrame();
+
+        const loop = async () => {
+          if (videoRef.current && pose) {
+            await pose.send({ image: videoRef.current });
+          }
+          animationFrameId = requestAnimationFrame(loop);
+        };
+        loop();
+
       } catch (e) { console.error(e); }
     };
 
     loadMediaPipe();
-    return () => {
-      isActive = false;
-      if (animationId) cancelAnimationFrame(animationId);
-      if (pose) pose.close();
+    return () => { 
+      cancelAnimationFrame(animationFrameId);
+      if (pose) pose.close(); 
     };
-  }, [mode, squatSubMode, videoRef, isCameraReady]);
+  }, [mode, videoRef, isPaused, squatSubMode]); // 依存配列に isPaused を追加
 
-  const modeLabel = mode === 'SQUAT'
-    ? (squatSubMode === 'UPPER' ? 'SQUAT / 肩' : 'SQUAT / 膝')
-    : 'PUSH-UP';
-  const modeBadgeClass = mode === 'PUSHUP'
-    ? 'bg-orange-900/80 border-orange-500'
-    : squatSubMode === 'FULL'
-      ? 'bg-green-900/80 border-green-500'
-      : 'bg-blue-900/80 border-blue-500';
+  const modeLabel = mode === 'PUSHUP' ? 'PUSH UP' : (squatSubMode === 'UPPER' ? 'SQUAT (Shoulder)' : 'SQUAT (Knee)');
+  const modeBadgeClass = mode === 'PUSHUP' ? 'bg-orange-500' : 'bg-blue-500';
 
   return (
-    <div className="relative w-full h-full flex flex-col items-center justify-center bg-black/50 backdrop-blur">
-      <div className="relative border-4 border-gray-800 rounded-3xl overflow-hidden w-full max-w-md aspect-[3/4] bg-gray-900/90 shadow-2xl">
-        {mode === 'SQUAT' && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex rounded-full border border-white/10 overflow-hidden backdrop-blur bg-black/30">
-            <button
-              onClick={() => onChangeSquatSubMode?.('UPPER')}
-              className={`px-4 py-1 text-xs font-bold transition ${squatSubMode === 'UPPER' ? 'bg-blue-500 text-white' : 'text-gray-300'}`}
-            >
-              UPPER BODY
-            </button>
-            <button
-              onClick={() => onChangeSquatSubMode?.('FULL')}
-              className={`px-4 py-1 text-xs font-bold transition ${squatSubMode === 'FULL' ? 'bg-green-500 text-white' : 'text-gray-300'}`}
-            >
-              FULL BODY
-            </button>
+    <div className="relative w-full h-full flex flex-col items-center justify-center relative z-10">
+      
+      {/* ★モード切り替えボタン（スクワット時のみ表示） */}
+      {mode === 'SQUAT' && (
+          <div className="absolute top-4 left-0 w-full flex justify-center z-30">
+              <div className="bg-gray-800/80 p-1 rounded-full flex space-x-1 border border-gray-600">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setSquatSubMode('UPPER'); }}
+                    className={`px-3 py-1 rounded-full text-xs font-bold transition ${squatSubMode === 'UPPER' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}
+                  >
+                      UPPER
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setSquatSubMode('FULL'); }}
+                    className={`px-3 py-1 rounded-full text-xs font-bold transition ${squatSubMode === 'FULL' ? 'bg-green-600 text-white' : 'text-gray-400'}`}
+                  >
+                      FULL BODY
+                  </button>
+              </div>
           </div>
-        )}
+      )}
 
-        <div className="relative w-full h-full cursor-pointer" onClick={togglePause}>
-          <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full object-cover" />
-          {!isModelReady && <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20"><p className="text-yellow-400 font-bold animate-pulse">SYSTEM LOADING...</p></div>}
-          {countdownDisplay !== null && <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-30"><p className="text-9xl font-black text-white animate-ping">{countdownDisplay}</p></div>}
-          {statusMessage && <div className="absolute top-1/2 left-0 w-full text-center z-30 transform -translate-y-1/2"><p className="text-6xl font-black text-yellow-400 drop-shadow-lg">{statusMessage}</p></div>}
-          {isPaused && (
-            <div className="absolute inset-0 bg-black/70 z-40 flex flex-col items-center justify-center space-y-2">
-              <p className="text-6xl font-black text-white tracking-widest">PAUSED ⏸️</p>
-              <p className="text-xs text-gray-300 uppercase tracking-[0.3em]">tap to resume</p>
+      <div 
+        className="relative w-full h-full cursor-pointer"
+        onClick={togglePause} // ★画面タップで一時停止
+      >
+        <div className="relative border-4 border-gray-800 rounded-lg overflow-hidden w-full max-w-md aspect-[3/4] bg-gray-900/50 backdrop-blur-sm mx-auto my-auto h-full object-cover">
+            <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full object-cover" />
+            
+            {!isModelReady && <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20"><p className="text-yellow-400 font-bold animate-pulse">SYSTEM LOADING...</p></div>}
+            
+            {/* カウントダウン */}
+            {countdownDisplay !== null && !isPaused && <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-30"><p className="text-9xl font-black text-white animate-ping">{countdownDisplay}</p></div>}
+            
+            {/* メッセージ */}
+            {statusMessage && <div className="absolute top-1/2 left-0 w-full text-center z-30 transform -translate-y-1/2"><p className="text-6xl font-black text-yellow-400 drop-shadow-lg">{statusMessage}</p></div>}
+            
+            {/* ★一時停止オーバーレイ */}
+            {isPaused && (
+                <div className="absolute inset-0 bg-black/70 z-40 flex flex-col items-center justify-center space-y-2">
+                    <p className="text-6xl font-black text-white tracking-widest animate-pulse">PAUSED</p>
+                    <p className="text-xs text-gray-300 uppercase tracking-[0.2em]">Tap to Resume</p>
+                </div>
+            )}
+
+            {/* カウント表示 */}
+            <div className="absolute top-16 left-4 bg-gray-900/80 p-4 rounded-xl backdrop-blur-md border border-gray-700 z-10">
+                <p className="text-xs text-gray-400 mb-1">COUNT</p>
+                <p className="text-6xl font-bold text-yellow-400 leading-none font-mono">{count}</p>
             </div>
-          )}
-        </div>
+            
+            {/* モードバッジ */}
+            <div className={`absolute top-16 right-4 px-3 py-1 rounded-full backdrop-blur-md border border-white/20 z-10 ${modeBadgeClass}`}>
+                <p className="text-xs font-bold text-white">{modeLabel}</p>
+            </div>
 
-        <div className="absolute top-16 left-4 bg-gray-900/80 p-4 rounded-xl backdrop-blur-md border border-gray-700 z-30">
-          <p className="text-xs text-gray-400 mb-1">COUNT</p>
-          <p className="text-6xl font-bold text-yellow-400 leading-none font-mono">{count}</p>
+            {/* リセットボタン (スクワットUpperのみ) */}
+            {mode === 'SQUAT' && squatSubMode === 'UPPER' && countdownDisplay === null && !isPaused && (
+                <button onClick={handleReset} className="absolute bottom-4 right-4 bg-gray-800/80 hover:bg-gray-700 text-white px-4 py-2 rounded-full text-xs font-bold border border-gray-600 z-40 shadow-lg">
+                    ↻ 位置リセット
+                </button>
+            )}
         </div>
-        <div className={`absolute top-16 right-4 px-3 py-1 rounded-full backdrop-blur-md border ${modeBadgeClass} z-30`}>
-          <p className="text-xs font-bold text-white">{modeLabel}</p>
-        </div>
-        {mode === 'SQUAT' && squatSubMode === 'UPPER' && countdownDisplay === null && !isPaused && (
-          <button onClick={handleReset} className="absolute bottom-4 right-4 bg-gray-800/80 hover:bg-gray-700 text-white px-4 py-2 rounded-full text-xs font-bold border border-gray-600 z-30 shadow-lg">
-            ↻ 位置リセット
-          </button>
-        )}
       </div>
-      <p className="text-[10px] text-gray-400 mt-4 opacity-80">画面タップで一時停止 / 再開</p>
     </div>
   );
 };
 
 // ---------------------------------------------------------
-// 4. メインレイアウト
+// 4. メインレイアウト (親でカメラを持つ)
 // ---------------------------------------------------------
 export default function Home() {
   const [hasStarted, setHasStarted] = useState(false);
-  const [currentMode, setCurrentMode] = useState<Mode>('SQUAT');
-  const [squatSubMode, setSquatSubMode] = useState<SquatSubMode>('UPPER');
-  const [historyVersion, setHistoryVersion] = useState(0);
-  const [isWebcamActive, setIsWebcamActive] = useState(false);
-  const [isCameraReady, setIsCameraReady] = useState(false);
+  const [currentMode, setCurrentMode] = useState<Mode>('SQUAT'); // デフォルトSQUAT
+  const [refreshHistory, setRefreshHistory] = useState(0);
+  
   const webcamRef = useRef<Webcam>(null);
-  const sharedVideoRef = useRef<HTMLVideoElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
-  const persistSession = useCallback((count: number, mode: 'SQUAT' | 'PUSHUP', subMode: SquatSubMode) => {
+  const handleUserMedia = () => {
+    if (webcamRef.current && webcamRef.current.video) {
+      // @ts-ignore
+      videoRef.current = webcamRef.current.video;
+    }
+  };
+
+  const handleSaveSession = useCallback((count: number, modeStr: string) => {
     if (count === 0) return;
-    const newSession: WorkoutSession = {
-      id: Date.now().toString(),
-      date: new Date().toISOString(),
-      mode: mode === 'PUSHUP' ? 'PUSHUP' : subMode,
-      count
+    // modeStrは 'UPPER', 'FULL', 'PUSHUP' のいずれかが来る
+    // 保存データ形式にあわせて変換
+    const saveMode = (modeStr === 'PUSHUP' ? 'PUSHUP' : (modeStr === 'FULL' ? 'FULL' : 'UPPER'));
+
+    const newSession: WorkoutSession = { 
+        id: Date.now().toString(), 
+        date: new Date().toISOString(), 
+        mode: saveMode as any,
+        count: count 
     };
     const saved = localStorage.getItem('squat_sessions');
     const sessions = saved ? JSON.parse(saved) : [];
     sessions.push(newSession);
     localStorage.setItem('squat_sessions', JSON.stringify(sessions));
-    setHistoryVersion(prev => prev + 1);
+    setRefreshHistory(prev => prev + 1);
   }, []);
 
-  const handleWebcamUserMedia = () => {
-    if (webcamRef.current?.video) {
-      sharedVideoRef.current = webcamRef.current.video;
-      setIsCameraReady(true);
-    }
-  };
-
-  const handleStart = () => {
-    setHasStarted(true);
-    setIsWebcamActive(true);
-  };
-
-  const stopWebcam = () => {
-    const stream = webcamRef.current?.stream;
-    if (stream) stream.getTracks().forEach(track => track.stop());
-    sharedVideoRef.current = null;
-    setIsCameraReady(false);
-  };
-
   const goHome = () => {
-    if(confirm("トップ画面に戻りますか？")) {
-      stopWebcam();
-      setIsWebcamActive(false);
+    if(confirm("トップ画面に戻りますか？\n(現在のカウントは保存されません)")) {
       setHasStarted(false);
-      setCurrentMode('SQUAT');
-      setSquatSubMode('UPPER');
     }
   };
 
   return (
-    <div className="relative min-h-screen bg-black text-white overflow-hidden">
-      {isWebcamActive && (
-        <div className="fixed inset-0 z-0 pointer-events-none">
-          <Webcam
-            ref={webcamRef}
-            audio={false}
-            mirrored
-            playsInline
-            className="w-full h-full object-cover"
-            videoConstraints={{ facingMode: 'user', width: 1280, height: 720 }}
-            onUserMedia={handleWebcamUserMedia}
-          />
-          <div className="absolute inset-0 bg-black/60" />
-        </div>
-      )}
-      <div className="relative z-10 min-h-screen">
-        {!hasStarted ? (
-          <StartScreen onStart={handleStart} />
-        ) : (
-          <div className="flex flex-col h-screen text-white overflow-hidden relative">
-            <button onClick={goHome} className="absolute top-4 left-4 z-50 flex flex-col items-start leading-none group active:scale-95 transition">
-              <span className="font-black italic text-lg text-yellow-400 tracking-tighter group-hover:text-green-400 transition-colors">SQUAT<br/>MASTER</span>
-            </button>
+    <div className="flex flex-col h-screen bg-black text-white overflow-hidden relative">
+      <div className="absolute inset-0 z-0 flex items-center justify-center">
+        {hasStarted && (
+           <Webcam
+             ref={webcamRef}
+             onUserMedia={handleUserMedia}
+             className="absolute top-0 left-0 w-full h-full object-cover opacity-50"
+             mirrored={true}
+             playsInline={true}
+             videoConstraints={{ facingMode: 'user', width: 480, height: 360 }}
+           />
+        )}
+      </div>
 
-            <div className="flex-1 relative overflow-hidden">
-              {currentMode === 'HISTORY' ? (
-                <HistoryScreen key={historyVersion} onDelete={() => setHistoryVersion(prev => prev + 1)} />
-              ) : (
-                <WorkoutScreen
-                  key={currentMode}
-                  mode={currentMode === 'PUSHUP' ? 'PUSHUP' : 'SQUAT'}
-                  squatSubMode={squatSubMode}
-                  onChangeSquatSubMode={setSquatSubMode}
-                  onSave={(count) => persistSession(count, currentMode === 'PUSHUP' ? 'PUSHUP' : 'SQUAT', squatSubMode)}
-                  videoRef={sharedVideoRef}
-                  isCameraReady={isCameraReady}
-                />
-              )}
-            </div>
-            <div className="h-20 bg-gray-900/90 border-t border-gray-800 flex justify-around items-center px-2 pb-2">
-              <button onClick={() => setCurrentMode('SQUAT')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'SQUAT' ? 'text-blue-400' : 'text-gray-500'}`}><span className="text-2xl">🏋️‍♂️</span><span className="text-xs font-bold">SQUAT</span></button>
-              <button onClick={() => setCurrentMode('PUSHUP')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'PUSHUP' ? 'text-orange-400' : 'text-gray-500'}`}><span className="text-2xl">💪</span><span className="text-xs font-bold">PUSH-UP</span></button>
-              <button onClick={() => setCurrentMode('HISTORY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'HISTORY' ? 'text-yellow-400' : 'text-gray-500'}`}><span className="text-2xl">📊</span><span className="text-xs font-bold">履歴</span></button>
-            </div>
-            <div className="absolute top-0 right-0 p-1 pointer-events-none z-50"><span className="text-[10px] text-gray-300 font-mono">{APP_VERSION}</span></div>
+      <div className="relative z-10 flex-1 flex flex-col h-full">
+        {hasStarted && (
+          <button onClick={goHome} className="absolute top-4 left-4 z-50 flex flex-col items-start leading-none group active:scale-95 transition">
+            <span className="font-black italic text-lg text-yellow-400 tracking-tighter group-hover:text-green-400 transition-colors">SQUAT<br/>MASTER</span>
+          </button>
+        )}
+
+        <div className="flex-1 relative overflow-hidden">
+          {!hasStarted ? (
+            <StartScreen onStart={() => setHasStarted(true)} />
+          ) : (
+            currentMode === 'HISTORY' ? (
+              <HistoryScreen onDelete={() => setRefreshHistory(prev => prev + 1)} />
+            ) : (
+              <WorkoutScreen 
+                key={currentMode} 
+                mode={currentMode === 'SQUAT' ? 'SQUAT' : 'PUSHUP'} 
+                onSave={handleSaveSession} 
+                videoRef={videoRef as React.RefObject<HTMLVideoElement>}
+              />
+            )
+          )}
+        </div>
+
+        {hasStarted && (
+          <div className="h-20 bg-gray-900 border-t border-gray-800 flex justify-around items-center px-2 pb-2">
+            {/* ★タブ3つに変更 */}
+            <button onClick={() => setCurrentMode('SQUAT')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'SQUAT' ? 'text-blue-400' : 'text-gray-500'}`}>
+                <span className="text-2xl">🦵</span><span className="text-xs font-bold">スクワット</span>
+            </button>
+            
+            <button onClick={() => setCurrentMode('PUSHUP')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'PUSHUP' ? 'text-orange-400' : 'text-gray-500'}`}>
+                <span className="text-2xl">💪</span><span className="text-xs font-bold">腕立て伏せ</span>
+            </button>
+            
+            <button onClick={() => setCurrentMode('HISTORY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'HISTORY' ? 'text-yellow-400' : 'text-gray-500'}`}>
+                <span className="text-2xl">📊</span><span className="text-xs font-bold">履歴</span>
+            </button>
           </div>
         )}
       </div>
+      
+      <div className="absolute top-0 right-0 p-1 pointer-events-none z-50"><span className="text-[10px] text-gray-600 font-mono">{APP_VERSION}</span></div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 /* eslint-disable */
 'use client';
 
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import Webcam from 'react-webcam';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
@@ -152,6 +152,36 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
 const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dailyGraphData = useMemo(() => {
+    const countsByDate: Record<string, number> = {};
+    sessions.forEach((session) => {
+      const date = new Date(session.date);
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      const key = `${y}-${m}-${d}`;
+      countsByDate[key] = (countsByDate[key] || 0) + session.count;
+    });
+    const result: { label: string; key: string; count: number }[] = [];
+    for (let i = 4; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      const key = `${y}-${m}-${d}`;
+      result.push({
+        key,
+        label: `${date.getMonth() + 1}/${date.getDate()}`,
+        count: countsByDate[key] || 0,
+      });
+    }
+    return result;
+  }, [sessions]);
+  const maxGraphValue = useMemo(() => {
+    const maxValue = Math.max(...dailyGraphData.map((d) => d.count), 0);
+    return maxValue === 0 ? 1 : maxValue;
+  }, [dailyGraphData]);
   
   useEffect(() => {
     const saved = localStorage.getItem('squat_sessions');
@@ -262,28 +292,25 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
     <div className="flex flex-col h-full bg-gray-900 text-white p-4 pt-16 overflow-y-auto">
       <h2 className="text-xl font-bold mb-4 text-center">History Log</h2>
 
-      {/* ★CSVボタンエリア */}
-      <div className="flex justify-center space-x-4 mb-6">
-        <button 
-          onClick={handleExport}
-          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center shadow-lg active:scale-95 transition"
-        >
-          📤 バックアップ(CSV)
-        </button>
-        <button 
-          onClick={handleImportClick}
-          className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center shadow-lg active:scale-95 transition"
-        >
-          📥 復元(CSV)
-        </button>
-        {/* 隠しinput */}
-        <input 
-          type="file" 
-          accept=".csv" 
-          ref={fileInputRef} 
-          onChange={handleFileChange} 
-          className="hidden" 
-        />
+      <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 mb-6 shadow-lg">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-bold text-white">直近5日間の記録</p>
+          <span className="text-[11px] text-gray-400">日別合計</span>
+        </div>
+        <div className="space-y-3">
+          {dailyGraphData.map((day) => (
+            <div key={day.key} className="flex items-center space-x-3">
+              <span className="text-xs text-gray-300 w-12 text-right">{day.label}</span>
+              <div className="flex-1 h-3 bg-gray-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-green-400 to-green-600 transition-all duration-300"
+                  style={{ width: `${(day.count / maxGraphValue) * 100}%` }}
+                ></div>
+              </div>
+              <span className="text-xs font-bold text-white w-8 text-right">{day.count}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="space-y-2 pb-20">
@@ -305,6 +332,32 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
           </div>
         ))}
       </div>
+
+      {/* ★CSVボタンエリア（ページ最下部） */}
+      <div className="mt-auto pt-4">
+        <div className="flex justify-center space-x-4">
+          <button 
+            onClick={handleExport}
+            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center shadow-lg active:scale-95 transition"
+          >
+            📤 バックアップ(CSV)
+          </button>
+          <button 
+            onClick={handleImportClick}
+            className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center shadow-lg active:scale-95 transition"
+          >
+            📥 復元(CSV)
+          </button>
+        </div>
+        {/* 隠しinput */}
+        <input 
+          type="file" 
+          accept=".csv" 
+          ref={fileInputRef} 
+          onChange={handleFileChange} 
+          className="hidden" 
+        />
+      </div>
     </div>
   );
 };
@@ -312,19 +365,31 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
 // ---------------------------------------------------------
 // 3. トレーニング画面
 // ---------------------------------------------------------
-const WorkoutScreen = ({ mode, onSave }: { mode: 'UPPER_BODY' | 'FULL_BODY', onSave: (count: number) => void }) => {
-  const webcamRef = useRef<Webcam>(null);
+const WorkoutScreen = ({
+  mode,
+  onSave,
+  videoRef,
+  isCameraReady,
+}: {
+  mode: 'UPPER_BODY' | 'FULL_BODY',
+  onSave: (count: number) => void,
+  videoRef: React.MutableRefObject<HTMLVideoElement | null>,
+  isCameraReady: boolean,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const logicState = useRef({ isSquatting: false, baselineY: 0, countdown: 3 });
   const [count, setCount] = useState(0);
   const countRef = useRef(0);
   const [countdownDisplay, setCountdownDisplay] = useState<number | null>(null);
-  const [isCameraReady, setIsCameraReady] = useState(false);
   const [isModelReady, setIsModelReady] = useState(false);
   const [statusMessage, setStatusMessage] = useState("準備中...");
 
   useEffect(() => { countRef.current = count; }, [count]);
-  useEffect(() => { return () => { if (countRef.current > 0) onSave(countRef.current); }; }, []);
+  useEffect(() => {
+    return () => {
+      if (countRef.current > 0) onSave(countRef.current);
+    };
+  }, [onSave]);
 
   const handleReset = () => {
     logicState.current.countdown = 3;
@@ -346,19 +411,25 @@ const WorkoutScreen = ({ mode, onSave }: { mode: 'UPPER_BODY' | 'FULL_BODY', onS
       }, 1000);
       return () => clearInterval(timer);
     }
-  }, [isCameraReady, isModelReady]);
+  }, [isCameraReady, isModelReady, countdownDisplay]);
 
   useEffect(() => {
-    let camera: any = null;
+    if (!videoRef.current || !isCameraReady) return;
+
     let pose: any = null;
+    let animationId: number | null = null;
+    let isActive = true;
+
     const onResults = (results: any) => {
-      if (!canvasRef.current || !webcamRef.current || !webcamRef.current.video) return;
-      const videoWidth = webcamRef.current.video.videoWidth;
-      const videoHeight = webcamRef.current.video.videoHeight;
-      canvasRef.current.width = videoWidth;
-      canvasRef.current.height = videoHeight;
+      if (!canvasRef.current) return;
       const ctx = canvasRef.current.getContext('2d', { willReadFrequently: true });
       if (!ctx) return;
+
+      const videoWidth = videoRef.current?.videoWidth || results.image.width;
+      const videoHeight = videoRef.current?.videoHeight || results.image.height;
+      canvasRef.current.width = videoWidth;
+      canvasRef.current.height = videoHeight;
+
       ctx.save();
       ctx.clearRect(0, 0, videoWidth, videoHeight);
       ctx.translate(videoWidth, 0);
@@ -366,69 +437,76 @@ const WorkoutScreen = ({ mode, onSave }: { mode: 'UPPER_BODY' | 'FULL_BODY', onS
       ctx.drawImage(results.image, 0, 0, videoWidth, videoHeight);
 
       if (logicState.current.countdown > 0) {
-          if (results.poseLandmarks) {
-              const leftShoulder = results.poseLandmarks[11];
-              const rightShoulder = results.poseLandmarks[12];
-              if (leftShoulder && rightShoulder) logicState.current.baselineY = (leftShoulder.y + rightShoulder.y) / 2;
-          }
-          ctx.strokeStyle = "yellow"; ctx.lineWidth = 2; ctx.beginPath();
-          ctx.moveTo(0, logicState.current.baselineY * videoHeight); ctx.lineTo(videoWidth, logicState.current.baselineY * videoHeight); ctx.stroke();
-          ctx.restore(); return;
+        if (results.poseLandmarks) {
+          const leftShoulder = results.poseLandmarks[11];
+          const rightShoulder = results.poseLandmarks[12];
+          if (leftShoulder && rightShoulder) logicState.current.baselineY = (leftShoulder.y + rightShoulder.y) / 2;
+        }
+        ctx.strokeStyle = "yellow"; ctx.lineWidth = 2; ctx.beginPath();
+        ctx.moveTo(0, logicState.current.baselineY * videoHeight); ctx.lineTo(videoWidth, logicState.current.baselineY * videoHeight); ctx.stroke();
+        ctx.restore();
+        return;
       }
 
       if (results.poseLandmarks) {
         if (mode === 'UPPER_BODY') {
-            const leftShoulder = results.poseLandmarks[11]; const rightShoulder = results.poseLandmarks[12];
-            if (leftShoulder && rightShoulder) {
-                const currentY = (leftShoulder.y + rightShoulder.y) / 2;
-                const baselineYPx = logicState.current.baselineY * videoHeight;
-                ctx.beginPath(); ctx.moveTo(0, baselineYPx); ctx.lineTo(videoWidth, baselineYPx); ctx.strokeStyle = "rgba(0,255,255,0.8)"; ctx.lineWidth = 2; ctx.stroke();
-                ctx.fillStyle = "#00FFFF"; ctx.beginPath(); ctx.arc(leftShoulder.x * videoWidth, leftShoulder.y * videoHeight, 8, 0, 2 * Math.PI); ctx.arc(rightShoulder.x * videoWidth, rightShoulder.y * videoHeight, 8, 0, 2 * Math.PI); ctx.fill();
-                if (currentY > logicState.current.baselineY + 0.1) { if (!logicState.current.isSquatting) logicState.current.isSquatting = true; } 
-                else if (currentY < logicState.current.baselineY + 0.03) { if (logicState.current.isSquatting) { logicState.current.isSquatting = false; setCount(c => c + 1); } }
-            }
+          const leftShoulder = results.poseLandmarks[11]; const rightShoulder = results.poseLandmarks[12];
+          if (leftShoulder && rightShoulder) {
+            const currentY = (leftShoulder.y + rightShoulder.y) / 2;
+            const baselineYPx = logicState.current.baselineY * videoHeight;
+            ctx.beginPath(); ctx.moveTo(0, baselineYPx); ctx.lineTo(videoWidth, baselineYPx); ctx.strokeStyle = "rgba(0,255,255,0.8)"; ctx.lineWidth = 2; ctx.stroke();
+            ctx.fillStyle = "#00FFFF"; ctx.beginPath(); ctx.arc(leftShoulder.x * videoWidth, leftShoulder.y * videoHeight, 8, 0, 2 * Math.PI); ctx.arc(rightShoulder.x * videoWidth, rightShoulder.y * videoHeight, 8, 0, 2 * Math.PI); ctx.fill();
+            if (currentY > logicState.current.baselineY + 0.1) { if (!logicState.current.isSquatting) logicState.current.isSquatting = true; } 
+            else if (currentY < logicState.current.baselineY + 0.03) { if (logicState.current.isSquatting) { logicState.current.isSquatting = false; setCount(c => c + 1); } }
+          }
         } else {
-            const leftHip = results.poseLandmarks[23]; const leftKnee = results.poseLandmarks[25]; const leftAnkle = results.poseLandmarks[27];
-            const rightHip = results.poseLandmarks[24]; const rightKnee = results.poseLandmarks[26]; const rightAnkle = results.poseLandmarks[28];
-            const leftScore = (leftHip?.visibility || 0) + (leftKnee?.visibility || 0) + (leftAnkle?.visibility || 0);
-            const rightScore = (rightHip?.visibility || 0) + (rightKnee?.visibility || 0) + (rightAnkle?.visibility || 0);
-            let tHip, tKnee, tAnkle;
-            if (leftScore > rightScore) { tHip = leftHip; tKnee = leftKnee; tAnkle = leftAnkle; } else { tHip = rightHip; tKnee = rightKnee; tAnkle = rightAnkle; }
-            if (tHip && tKnee && tAnkle) {
-                const angle = calculateAngle(tHip, tKnee, tAnkle);
-                ctx.beginPath(); ctx.moveTo(tHip.x * videoWidth, tHip.y * videoHeight); ctx.lineTo(tKnee.x * videoWidth, tKnee.y * videoHeight); ctx.lineTo(tAnkle.x * videoWidth, tAnkle.y * videoHeight);
-                ctx.lineWidth = 4; ctx.strokeStyle = "#00FF00"; ctx.stroke();
-                if (angle < 100) { if (!logicState.current.isSquatting) logicState.current.isSquatting = true; } 
-                else if (angle > 160) { if (logicState.current.isSquatting) { logicState.current.isSquatting = false; setCount(c => c + 1); } }
-            }
+          const leftHip = results.poseLandmarks[23]; const leftKnee = results.poseLandmarks[25]; const leftAnkle = results.poseLandmarks[27];
+          const rightHip = results.poseLandmarks[24]; const rightKnee = results.poseLandmarks[26]; const rightAnkle = results.poseLandmarks[28];
+          const leftScore = (leftHip?.visibility || 0) + (leftKnee?.visibility || 0) + (leftAnkle?.visibility || 0);
+          const rightScore = (rightHip?.visibility || 0) + (rightKnee?.visibility || 0) + (rightAnkle?.visibility || 0);
+          let tHip, tKnee, tAnkle;
+          if (leftScore > rightScore) { tHip = leftHip; tKnee = leftKnee; tAnkle = leftAnkle; } else { tHip = rightHip; tKnee = rightKnee; tAnkle = rightAnkle; }
+          if (tHip && tKnee && tAnkle) {
+            const angle = calculateAngle(tHip, tKnee, tAnkle);
+            ctx.beginPath(); ctx.moveTo(tHip.x * videoWidth, tHip.y * videoHeight); ctx.lineTo(tKnee.x * videoWidth, tKnee.y * videoHeight); ctx.lineTo(tAnkle.x * videoWidth, tAnkle.y * videoHeight);
+            ctx.lineWidth = 4; ctx.strokeStyle = "#00FF00"; ctx.stroke();
+            if (angle < 100) { if (!logicState.current.isSquatting) logicState.current.isSquatting = true; } 
+            else if (angle > 160) { if (logicState.current.isSquatting) { logicState.current.isSquatting = false; setCount(c => c + 1); } }
+          }
         }
       }
       ctx.restore();
     };
 
+    const processFrame = async () => {
+      if (!pose || !videoRef.current || !isActive) return;
+      await pose.send({ image: videoRef.current });
+      animationId = requestAnimationFrame(processFrame);
+    };
+
     const loadMediaPipe = async () => {
       try {
-        const poseModule = await import('@mediapipe/pose'); const cameraModule = await import('@mediapipe/camera_utils');
+        setIsModelReady(false);
+        const poseModule = await import('@mediapipe/pose');
         pose = new poseModule.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
         pose.setOptions({ modelComplexity: 0, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
         pose.onResults(onResults);
-        if (webcamRef.current && webcamRef.current.video) {
-          camera = new cameraModule.Camera(webcamRef.current.video, {
-            onFrame: async () => { if (webcamRef.current?.video && pose) await pose.send({ image: webcamRef.current.video }); },
-            width: 480, height: 360,
-          });
-          camera.start(); setIsModelReady(true);
-        }
+        setIsModelReady(true);
+        processFrame();
       } catch (e) { console.error(e); }
     };
+
     loadMediaPipe();
-    return () => { if (camera) camera.stop(); if (pose) pose.close(); };
-  }, [mode]);
+    return () => {
+      isActive = false;
+      if (animationId) cancelAnimationFrame(animationId);
+      if (pose) pose.close();
+    };
+  }, [mode, videoRef, isCameraReady]);
 
   return (
-    <div className="relative w-full h-full flex flex-col items-center justify-center bg-black">
+    <div className="relative w-full h-full flex flex-col items-center justify-center bg-black/60 backdrop-blur">
       <div className="relative border-4 border-gray-800 rounded-lg overflow-hidden w-full max-w-md aspect-[3/4] bg-gray-900">
-        <Webcam ref={webcamRef} onUserMedia={() => setIsCameraReady(true)} className="absolute top-0 left-0 w-full h-full object-cover opacity-0" mirrored={true} playsInline={true} videoConstraints={{ facingMode: 'user', width: 480, height: 360 }} />
         <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full object-cover" />
         {!isModelReady && <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20"><p className="text-yellow-400 font-bold animate-pulse">SYSTEM LOADING...</p></div>}
         {countdownDisplay !== null && <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-30"><p className="text-9xl font-black text-white animate-ping">{countdownDisplay}</p></div>}
@@ -448,6 +526,10 @@ export default function Home() {
   const [hasStarted, setHasStarted] = useState(false);
   const [currentMode, setCurrentMode] = useState<Mode>('UPPER_BODY');
   const [refreshHistory, setRefreshHistory] = useState(0);
+  const [isWebcamActive, setIsWebcamActive] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  const webcamRef = useRef<Webcam>(null);
+  const sharedVideoRef = useRef<HTMLVideoElement | null>(null);
 
   const handleSaveSession = useCallback((count: number) => {
     if (count === 0) return;
@@ -464,33 +546,81 @@ export default function Home() {
     setRefreshHistory(prev => prev + 1);
   }, [currentMode]);
 
-  const goHome = () => {
-    if(confirm("トップ画面に戻りますか？")) {
-      setHasStarted(false);
+  const handleWebcamUserMedia = () => {
+    if (webcamRef.current?.video) {
+      sharedVideoRef.current = webcamRef.current.video;
+      setIsCameraReady(true);
     }
   };
 
-  if (!hasStarted) return <StartScreen onStart={() => setHasStarted(true)} />;
+  const handleStart = () => {
+    setHasStarted(true);
+    setIsWebcamActive(true);
+  };
+
+  const stopWebcam = () => {
+    const stream = webcamRef.current?.stream;
+    if (stream) stream.getTracks().forEach(track => track.stop());
+    sharedVideoRef.current = null;
+    setIsCameraReady(false);
+  };
+
+  const goHome = () => {
+    if(confirm("トップ画面に戻りますか？")) {
+      stopWebcam();
+      setIsWebcamActive(false);
+      setHasStarted(false);
+      setCurrentMode('UPPER_BODY');
+    }
+  };
 
   return (
-    <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
-      <button onClick={goHome} className="absolute top-4 left-4 z-50 flex flex-col items-start leading-none group active:scale-95 transition">
-        <span className="font-black italic text-lg text-yellow-400 tracking-tighter group-hover:text-green-400 transition-colors">SQUAT<br/>MASTER</span>
-      </button>
-
-      <div className="flex-1 relative overflow-hidden">
-        {currentMode === 'HISTORY' ? (
-          <HistoryScreen onDelete={() => setRefreshHistory(prev => prev + 1)} />
+    <div className="relative min-h-screen bg-black text-white overflow-hidden">
+      {isWebcamActive && (
+        <div className="fixed inset-0 z-0 pointer-events-none">
+          <Webcam
+            ref={webcamRef}
+            audio={false}
+            mirrored
+            playsInline
+            className="w-full h-full object-cover"
+            videoConstraints={{ facingMode: 'user', width: 1280, height: 720 }}
+            onUserMedia={handleWebcamUserMedia}
+          />
+          <div className="absolute inset-0 bg-black/60" />
+        </div>
+      )}
+      <div className="relative z-10 min-h-screen">
+        {!hasStarted ? (
+          <StartScreen onStart={handleStart} />
         ) : (
-          <WorkoutScreen key={currentMode} mode={currentMode === 'UPPER_BODY' ? 'UPPER_BODY' : 'FULL_BODY'} onSave={handleSaveSession} />
+          <div className="flex flex-col h-screen text-white overflow-hidden relative">
+            <button onClick={goHome} className="absolute top-4 left-4 z-50 flex flex-col items-start leading-none group active:scale-95 transition">
+              <span className="font-black italic text-lg text-yellow-400 tracking-tighter group-hover:text-green-400 transition-colors">SQUAT<br/>MASTER</span>
+            </button>
+
+            <div className="flex-1 relative overflow-hidden">
+              {currentMode === 'HISTORY' ? (
+                <HistoryScreen onDelete={() => setRefreshHistory(prev => prev + 1)} />
+              ) : (
+                <WorkoutScreen
+                  key={currentMode}
+                  mode={currentMode === 'UPPER_BODY' ? 'UPPER_BODY' : 'FULL_BODY'}
+                  onSave={handleSaveSession}
+                  videoRef={sharedVideoRef}
+                  isCameraReady={isCameraReady}
+                />
+              )}
+            </div>
+            <div className="h-20 bg-gray-900/90 border-t border-gray-800 flex justify-around items-center px-2 pb-2">
+              <button onClick={() => setCurrentMode('UPPER_BODY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'UPPER_BODY' ? 'text-blue-400' : 'text-gray-500'}`}><span className="text-2xl">👤</span><span className="text-xs font-bold">上半身(肩)</span></button>
+              <button onClick={() => setCurrentMode('FULL_BODY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'FULL_BODY' ? 'text-green-400' : 'text-gray-500'}`}><span className="text-2xl">🦵</span><span className="text-xs font-bold">全身(膝)</span></button>
+              <button onClick={() => setCurrentMode('HISTORY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'HISTORY' ? 'text-yellow-400' : 'text-gray-500'}`}><span className="text-2xl">📊</span><span className="text-xs font-bold">履歴/編集</span></button>
+            </div>
+            <div className="absolute top-0 right-0 p-1 pointer-events-none z-50"><span className="text-[10px] text-gray-300 font-mono">{APP_VERSION}</span></div>
+          </div>
         )}
       </div>
-      <div className="h-20 bg-gray-900 border-t border-gray-800 flex justify-around items-center px-2 pb-2">
-        <button onClick={() => setCurrentMode('UPPER_BODY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'UPPER_BODY' ? 'text-blue-400' : 'text-gray-500'}`}><span className="text-2xl">👤</span><span className="text-xs font-bold">上半身(肩)</span></button>
-        <button onClick={() => setCurrentMode('FULL_BODY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'FULL_BODY' ? 'text-green-400' : 'text-gray-500'}`}><span className="text-2xl">🦵</span><span className="text-xs font-bold">全身(膝)</span></button>
-        <button onClick={() => setCurrentMode('HISTORY')} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${currentMode === 'HISTORY' ? 'text-yellow-400' : 'text-gray-500'}`}><span className="text-2xl">📊</span><span className="text-xs font-bold">履歴/編集</span></button>
-      </div>
-      <div className="absolute top-0 right-0 p-1 pointer-events-none z-50"><span className="text-[10px] text-gray-600 font-mono">{APP_VERSION}</span></div>
     </div>
   );
 }

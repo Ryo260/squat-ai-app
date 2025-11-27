@@ -6,7 +6,7 @@ import Webcam from 'react-webcam';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 
-const APP_VERSION = "v0.1.5 (100Days & Nav)";
+const APP_VERSION = "v0.1.6 (CSV Backup)";
 
 // ---------------------------------------------------------
 // 型定義 & ユーティリティ
@@ -33,7 +33,7 @@ const calculateAngle = (a: any, b: any, c: any) => {
 const StartScreen = ({ onStart }: { onStart: () => void }) => {
   const [heatmapData, setHeatmapData] = useState<{date: string, count: number}[]>([]);
   const [totalCount, setTotalCount] = useState(0);
-  const scrollContainerRef = useRef<HTMLDivElement>(null); // スクロール制御用
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const getTodayStr = () => {
     const d = new Date();
@@ -69,7 +69,6 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
     const data = Object.keys(map).map(date => ({ date, count: map[date] }));
     setHeatmapData(data);
 
-    // ★修正ポイント：描画後に右端（今日）へ自動スクロール
     setTimeout(() => {
       if (scrollContainerRef.current) {
         scrollContainerRef.current.scrollLeft = scrollContainerRef.current.scrollWidth;
@@ -79,7 +78,7 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
 
   const today = new Date();
   const startDate = new Date();
-  startDate.setDate(today.getDate() - 100); // ★100日前から表示
+  startDate.setDate(today.getDate() - 100);
   const todayStr = getTodayStr();
 
   return (
@@ -93,7 +92,6 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
         </div>
 
         <div className="bg-gray-800/40 p-3 rounded-xl border border-gray-700 overflow-hidden shadow-2xl">
-          {/* ★refを追加してスクロール制御 */}
           <div className="overflow-x-auto" ref={scrollContainerRef}>
             <div className="min-w-[500px]">
               <CalendarHeatmap
@@ -138,10 +136,11 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
 };
 
 // ---------------------------------------------------------
-// 2. 履歴画面
+// 2. 履歴画面 (CSV機能付き)
 // ---------------------------------------------------------
 const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   useEffect(() => {
     const saved = localStorage.getItem('squat_sessions');
@@ -152,6 +151,7 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
     }
   }, [onDelete]);
 
+  // 1行削除
   const handleDelete = (id: string) => {
     if(!confirm('削除しますか？')) return;
     const newSessions = sessions.filter(s => s.id !== id);
@@ -159,10 +159,122 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
     onDelete();
   };
 
-  // ★上部に余白を追加 (pt-16)
+  // ★CSV書き出し
+  const handleExport = () => {
+    if (sessions.length === 0) {
+      alert("データがありません");
+      return;
+    }
+    // ヘッダー + データ行
+    const header = "id,date,mode,count\n";
+    const rows = sessions.map(s => `${s.id},${s.date},${s.mode},${s.count}`).join("\n");
+    const csvContent = header + rows;
+    
+    // ダウンロード発火
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const today = new Date().toISOString().split('T')[0];
+    link.setAttribute('download', `squat_backup_${today}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // ★CSV読み込み
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const lines = text.trim().split('\n');
+        // ヘッダーを除外
+        const dataLines = lines.slice(1);
+        
+        const newSessions: WorkoutSession[] = [];
+        dataLines.forEach(line => {
+          const [id, date, mode, countStr] = line.split(',');
+          if (id && date && mode && countStr) {
+            newSessions.push({
+              id,
+              date,
+              mode: mode as 'UPPER' | 'FULL',
+              count: Number(countStr)
+            });
+          }
+        });
+
+        if (newSessions.length === 0) {
+          alert("有効なデータが見つかりませんでした");
+          return;
+        }
+
+        // 既存データとマージ（ID重複チェック）
+        const currentSaved = localStorage.getItem('squat_sessions');
+        let currentSessions: WorkoutSession[] = currentSaved ? JSON.parse(currentSaved) : [];
+        
+        // IDが既に存在する場合はスキップ、新しいものだけ追加
+        let addedCount = 0;
+        newSessions.forEach(newS => {
+          if (!currentSessions.some(curr => curr.id === newS.id)) {
+            currentSessions.push(newS);
+            addedCount++;
+          }
+        });
+
+        if (addedCount > 0) {
+          localStorage.setItem('squat_sessions', JSON.stringify(currentSessions));
+          alert(`${addedCount}件のデータを復元しました！`);
+          onDelete(); // 再読み込み
+        } else {
+          alert("新しいデータはありませんでした（全て重複済み）");
+        }
+      } catch (err) {
+        alert("ファイルの読み込みに失敗しました");
+        console.error(err);
+      }
+    };
+    reader.readAsText(file);
+    // inputをリセット
+    e.target.value = '';
+  };
+
   return (
     <div className="flex flex-col h-full bg-gray-900 text-white p-4 pt-16 overflow-y-auto">
       <h2 className="text-xl font-bold mb-4 text-center">History Log</h2>
+
+      {/* ★CSVボタンエリア */}
+      <div className="flex justify-center space-x-4 mb-6">
+        <button 
+          onClick={handleExport}
+          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center shadow-lg active:scale-95 transition"
+        >
+          📤 バックアップ(CSV)
+        </button>
+        <button 
+          onClick={handleImportClick}
+          className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center shadow-lg active:scale-95 transition"
+        >
+          📥 復元(CSV)
+        </button>
+        {/* 隠しinput */}
+        <input 
+          type="file" 
+          accept=".csv" 
+          ref={fileInputRef} 
+          onChange={handleFileChange} 
+          className="hidden" 
+        />
+      </div>
+
       <div className="space-y-2 pb-20">
         {sessions.length === 0 && <p className="text-center text-gray-500 py-10">記録なし</p>}
         {sessions.map((session) => (
@@ -310,10 +422,7 @@ const WorkoutScreen = ({ mode, onSave }: { mode: 'UPPER_BODY' | 'FULL_BODY', onS
         {!isModelReady && <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20"><p className="text-yellow-400 font-bold animate-pulse">SYSTEM LOADING...</p></div>}
         {countdownDisplay !== null && <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-30"><p className="text-9xl font-black text-white animate-ping">{countdownDisplay}</p></div>}
         {statusMessage && <div className="absolute top-1/2 left-0 w-full text-center z-30 transform -translate-y-1/2"><p className="text-6xl font-black text-yellow-400 drop-shadow-lg">{statusMessage}</p></div>}
-        
-        {/* ★COUNT表示を少し下に移動 (top-16) */}
         <div className="absolute top-16 left-4 bg-gray-900/80 p-4 rounded-xl backdrop-blur-md border border-gray-700 z-10"><p className="text-xs text-gray-400 mb-1">COUNT</p><p className="text-6xl font-bold text-yellow-400 leading-none font-mono">{count}</p></div>
-        
         <div className="absolute top-16 right-4 bg-blue-900/80 px-3 py-1 rounded-full backdrop-blur-md border border-blue-500 z-10"><p className="text-xs font-bold text-blue-200">{mode === 'UPPER_BODY' ? '上半身' : '全身'}</p></div>
         {mode === 'UPPER_BODY' && countdownDisplay === null && <button onClick={handleReset} className="absolute bottom-4 right-4 bg-gray-800/80 hover:bg-gray-700 text-white px-4 py-2 rounded-full text-xs font-bold border border-gray-600 z-40 shadow-lg">↻ 位置リセット</button>}
       </div>
@@ -344,7 +453,6 @@ export default function Home() {
     setRefreshHistory(prev => prev + 1);
   }, [currentMode]);
 
-  // ★ロゴボタンでトップに戻る関数
   const goHome = () => {
     if(confirm("トップ画面に戻りますか？\n(現在のカウントは保存されません)")) {
       setHasStarted(false);
@@ -355,11 +463,7 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
-      {/* ★左上のロゴボタン (押すとトップへ) */}
-      <button 
-        onClick={goHome}
-        className="absolute top-4 left-4 z-50 flex flex-col items-start leading-none group active:scale-95 transition"
-      >
+      <button onClick={goHome} className="absolute top-4 left-4 z-50 flex flex-col items-start leading-none group active:scale-95 transition">
         <span className="font-black italic text-lg text-yellow-400 tracking-tighter group-hover:text-green-400 transition-colors">SQUAT<br/>MASTER</span>
       </button>
 

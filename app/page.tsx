@@ -127,6 +127,17 @@ const StartScreen = ({ onStart }: { onStart: () => void }) => {
           <div className="absolute top-0 left-0 w-full h-1/2 bg-white/20 rounded-t-2xl pointer-events-none"></div>
         </button>
 
+        <div className="bg-gray-800/70 border border-gray-700 rounded-2xl p-4 space-y-2 shadow-xl">
+          <div className="flex items-center space-x-2">
+            <span className="text-yellow-300 text-xl">⭐</span>
+            <p className="text-sm font-bold text-white">ホーム画面に追加して即起動！</p>
+          </div>
+          <p className="text-xs text-gray-300 leading-relaxed">
+            iPhone: Safari の共有ボタン →「ホーム画面に追加」／Android: Chrome メニュー →「ホーム画面に追加」
+          </p>
+          <p className="text-[11px] text-gray-500">※PWAとしてインストールするとオフラインでも起動が早くなります。</p>
+        </div>
+
         <div className="text-center pt-8">
           <p className="text-xs text-gray-600 font-mono">{APP_VERSION}</p>
         </div>
@@ -454,7 +465,7 @@ export default function Home() {
   }, [currentMode]);
 
   const goHome = () => {
-    if(confirm("トップ画面に戻りますか？\n(現在のカウントは保存されません)")) {
+    if(confirm("トップ画面に戻りますか？")) {
       setHasStarted(false);
     }
   };

@@ -6,17 +6,18 @@ import Webcam from 'react-webcam';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 
-const APP_VERSION = "v0.1.6 (CSV Backup)";
+const APP_VERSION = "v0.1.7 (Push-up Mode)";
 
 // ---------------------------------------------------------
 // 型定義 & ユーティリティ
 // ---------------------------------------------------------
-type Mode = 'UPPER_BODY' | 'FULL_BODY' | 'HISTORY';
+type Mode = 'SQUAT' | 'PUSHUP' | 'HISTORY';
+type SquatSubMode = 'UPPER' | 'FULL';
 
 interface WorkoutSession {
   id: string;
   date: string;
-  mode: 'UPPER' | 'FULL';
+  mode: SquatSubMode | 'PUSHUP';
   count: number;
 }
 

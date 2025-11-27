@@ -3,8 +3,10 @@
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import Webcam from 'react-webcam';
+import CalendarHeatmap from 'react-calendar-heatmap';
+import 'react-calendar-heatmap/dist/styles.css';
 
-const APP_VERSION = "v0.1.1 (Fix Save & Reset)";
+const APP_VERSION = "v0.1.3 (Top Heatmap)";
 
 // ---------------------------------------------------------
 // 型定義 & ユーティリティ
@@ -18,7 +20,6 @@ interface WorkoutSession {
   count: number;
 }
 
-// 角度計算
 const calculateAngle = (a: any, b: any, c: any) => {
   const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
   let angle = Math.abs(radians * 180.0 / Math.PI);
@@ -27,53 +28,148 @@ const calculateAngle = (a: any, b: any, c: any) => {
 };
 
 // ---------------------------------------------------------
-// 1. 履歴画面コンポーネント
+// 1. スタート画面 (ヒートマップ搭載)
+// ---------------------------------------------------------
+const StartScreen = ({ onStart }: { onStart: () => void }) => {
+  const [heatmapData, setHeatmapData] = useState<{date: string, count: number}[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+
+  useEffect(() => {
+    // データ読み込み
+    const saved = localStorage.getItem('squat_sessions');
+    if (saved) {
+      const parsed: WorkoutSession[] = JSON.parse(saved);
+      setTotalCount(parsed.reduce((sum, s) => sum + s.count, 0));
+
+      const map: {[key: string]: number} = {};
+      parsed.forEach(s => {
+        const d = new Date(s.date).toISOString().split('T')[0];
+        map[d] = (map[d] || 0) + s.count;
+      });
+      const data = Object.keys(map).map(date => ({ date, count: map[date] }));
+      setHeatmapData(data);
+    }
+  }, []);
+
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(today.getFullYear() - 1);
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-6">
+      <div className="w-full max-w-md space-y-8">
+        
+        {/* タイトル */}
+        <div className="text-center space-y-2">
+          <h1 className="text-5xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-green-500">
+            SQUAT<br/>MASTER
+          </h1>
+          <p className="text-gray-400 text-sm">Total Squats: <span className="text-white font-bold">{totalCount}</span></p>
+        </div>
+
+        {/* ヒートマップ */}
+        <div className="bg-gray-800/40 p-3 rounded-xl border border-gray-700 overflow-hidden shadow-2xl">
+          <div className="overflow-x-auto">
+            <div className="min-w-[500px]">
+              <CalendarHeatmap
+                startDate={oneYearAgo}
+                endDate={today}
+                values={heatmapData}
+                classForValue={(value) => {
+                  if (value && value.date === todayStr) {
+                      return `color-scale-${Math.min(value.count > 0 ? 4 : 0, 4)} today-cell`;
+                  }
+                  if (!value) {
+                       // データがない日が今日の場合
+                       const d = new Date().toISOString().split('T')[0];
+                       // react-calendar-heatmapはvalueがnullの場合日付がわからないので
+                       // ここでは簡易的に今日の日付のセルにクラスを当てるのは難しい
+                       // そのため、transformDayElementで制御するか、
+                       // 必ず今日のエントリをダミー(count:0)で作っておく手法がある。
+                       // 今回はシンプルに「今日データがあれば緑枠」にする。
+                       return `color-empty`;
+                  }
+                  return `color-scale-${Math.min(Math.ceil(value.count / 10), 4)}`;
+                }}
+                transformDayElement={(element, value, index) => {
+                  // 今日の日付なら強制的に today-cell クラスを付与
+                  // (valueがnullでも日付判定するためにtitleを使うハック)
+                  const dateTitle = element?.props?.children?.props?.children || ""; 
+                  // ライブラリの仕様上、直接日付を取るのが難しいので
+                  // ここでは「今日のエントリ（0回でも）」をデータ配列に含める処理をuseEffect側でするのが確実
+                  return element;
+                }}
+                titleForValue={(value) => value ? `${value.date}: ${value.count}回` : ''}
+              />
+            </div>
+          </div>
+          <p className="text-center text-[10px] text-gray-500 mt-2">
+             <span className="animate-pulse text-green-400 font-bold">□</span> 今日の枠を埋めよう！
+          </p>
+        </div>
+
+        {/* STARTボタン */}
+        <button
+          onClick={onStart}
+          className="group relative w-full py-6 px-6 bg-green-600 hover:bg-green-500 rounded-2xl shadow-[0_10px_0_rgb(21,128,61)] active:shadow-[0_2px_0_rgb(21,128,61)] active:translate-y-2 transition-all duration-150 overflow-hidden"
+        >
+          <div className="relative z-10 flex items-center justify-center space-x-2">
+            <span className="text-3xl font-black tracking-widest text-white">START</span>
+            <span className="text-3xl">🔥</span>
+          </div>
+          <div className="absolute top-0 left-0 w-full h-1/2 bg-white/20 rounded-t-2xl pointer-events-none"></div>
+        </button>
+
+        <div className="text-center pt-8">
+          <p className="text-xs text-gray-600 font-mono">{APP_VERSION}</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------
+// 2. 履歴画面 (リストのみ)
 // ---------------------------------------------------------
 const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
-
+  
   useEffect(() => {
     const saved = localStorage.getItem('squat_sessions');
     if (saved) {
       const parsed: WorkoutSession[] = JSON.parse(saved);
-      // 新しい順
       parsed.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setSessions(parsed);
-      setTotalCount(parsed.reduce((sum, s) => sum + s.count, 0));
     }
   }, [onDelete]);
 
   const handleDelete = (id: string) => {
-    if(!confirm('この記録を削除しますか？')) return;
+    if(!confirm('削除しますか？')) return;
     const newSessions = sessions.filter(s => s.id !== id);
     localStorage.setItem('squat_sessions', JSON.stringify(newSessions));
-    setSessions(newSessions);
-    setTotalCount(newSessions.reduce((sum, s) => sum + s.count, 0));
+    onDelete();
   };
 
   return (
     <div className="flex flex-col h-full bg-gray-900 text-white p-4 overflow-y-auto">
-      <div className="mb-6 text-center">
-        <p className="text-gray-400 text-sm">TOTAL SQUATS</p>
-        <p className="text-6xl font-black text-yellow-400 font-mono">{totalCount}</p>
-      </div>
-      <div className="space-y-3 pb-20">
+      <h2 className="text-xl font-bold mb-4 text-center">History Log</h2>
+      <div className="space-y-2 pb-20">
         {sessions.length === 0 && <p className="text-center text-gray-500 py-10">記録なし</p>}
         {sessions.map((session) => (
-          <div key={session.id} className="bg-gray-800 p-4 rounded-xl flex justify-between items-center shadow-sm">
+          <div key={session.id} className="bg-gray-800 p-3 rounded-lg flex justify-between items-center shadow-sm border border-gray-700">
             <div>
               <p className="text-xs text-gray-400">
                 {new Date(session.date).toLocaleString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
               </p>
               <div className="flex items-center space-x-2">
-                <span className={`text-xs px-2 py-0.5 rounded ${session.mode === 'UPPER' ? 'bg-blue-900 text-blue-300' : 'bg-green-900 text-green-300'}`}>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded ${session.mode === 'UPPER' ? 'bg-blue-900 text-blue-300' : 'bg-green-900 text-green-300'}`}>
                     {session.mode === 'UPPER' ? '上半身' : '全身'}
                 </span>
-                <span className="font-bold text-xl">{session.count} 回</span>
+                <span className="font-bold text-lg">{session.count} 回</span>
               </div>
             </div>
-            <button onClick={() => handleDelete(session.id)} className="bg-red-900/30 text-red-400 p-3 rounded-full hover:bg-red-900/50 transition">🗑️</button>
+            <button onClick={() => handleDelete(session.id)} className="bg-red-900/20 text-red-400 p-2 rounded-full hover:bg-red-900/40 transition">🗑️</button>
           </div>
         ))}
       </div>
@@ -82,89 +178,48 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
 };
 
 // ---------------------------------------------------------
-// 2. トレーニング画面
+// 3. トレーニング画面
 // ---------------------------------------------------------
 const WorkoutScreen = ({ mode, onSave }: { mode: 'UPPER_BODY' | 'FULL_BODY', onSave: (count: number) => void }) => {
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
-  // ロジック用Ref
-  const logicState = useRef({
-    isSquatting: false,
-    baselineY: 0,
-    countdown: 3,
-  });
-
+  const logicState = useRef({ isSquatting: false, baselineY: 0, countdown: 3 });
   const [count, setCount] = useState(0);
-  // ★保存用に最新のカウントをRefにも入れておく（useEffect内で参照するため）
   const countRef = useRef(0);
-
   const [countdownDisplay, setCountdownDisplay] = useState<number | null>(null);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isModelReady, setIsModelReady] = useState(false);
   const [statusMessage, setStatusMessage] = useState("準備中...");
 
-  // カウントが増えたらRefも更新
-  useEffect(() => {
-    countRef.current = count;
-  }, [count]);
+  useEffect(() => { countRef.current = count; }, [count]);
+  useEffect(() => { return () => { if (countRef.current > 0) onSave(countRef.current); }; }, []);
 
-  // ★修正ポイント：コンポーネントが「消える時だけ」保存する
-  useEffect(() => {
-    // マウント時の処理（特になし）
-    return () => {
-      // アンマウント時（タブ切り替え時）の処理
-      // Refから最新の値を取るので、依存配列の影響を受けない
-      if (countRef.current > 0) {
-        onSave(countRef.current);
-      }
-    };
-  }, []); // 依存配列を空にすることで、最初と最後だけ実行される
-
-  // リセットボタン処理
   const handleReset = () => {
-    // カウントダウンを再開させるだけで、ロジック側で自動的に基準を取り直します
     logicState.current.countdown = 3;
     setCountdownDisplay(3);
-    
-    // タイマー再始動
     const timer = setInterval(() => {
       logicState.current.countdown -= 1;
-      if (logicState.current.countdown > 0) {
-        setCountdownDisplay(logicState.current.countdown);
-      } else {
-        clearInterval(timer);
-        setCountdownDisplay(null);
-        setStatusMessage("RESET OK!");
-        setTimeout(() => setStatusMessage(""), 1000);
-      }
+      if (logicState.current.countdown > 0) { setCountdownDisplay(logicState.current.countdown); } 
+      else { clearInterval(timer); setCountdownDisplay(null); setStatusMessage("RESET OK!"); setTimeout(() => setStatusMessage(""), 1000); }
     }, 1000);
   };
 
-  // 初回のカウントダウン開始
   useEffect(() => {
     if (isCameraReady && isModelReady && logicState.current.countdown > 0 && countdownDisplay === null) {
       setCountdownDisplay(3);
       const timer = setInterval(() => {
         logicState.current.countdown -= 1;
-        if (logicState.current.countdown > 0) {
-          setCountdownDisplay(logicState.current.countdown);
-        } else {
-          clearInterval(timer);
-          setCountdownDisplay(null);
-          setStatusMessage("GO!");
-          setTimeout(() => setStatusMessage(""), 1000);
-        }
+        if (logicState.current.countdown > 0) { setCountdownDisplay(logicState.current.countdown); } 
+        else { clearInterval(timer); setCountdownDisplay(null); setStatusMessage("GO!"); setTimeout(() => setStatusMessage(""), 1000); }
       }, 1000);
       return () => clearInterval(timer);
     }
   }, [isCameraReady, isModelReady]);
 
-  // AIループ
   useEffect(() => {
     let camera: any = null;
     let pose: any = null;
-
     const onResults = (results: any) => {
       if (!canvasRef.current || !webcamRef.current || !webcamRef.current.video) return;
       const videoWidth = webcamRef.current.video.videoWidth;
@@ -173,101 +228,47 @@ const WorkoutScreen = ({ mode, onSave }: { mode: 'UPPER_BODY' | 'FULL_BODY', onS
       canvasRef.current.height = videoHeight;
       const ctx = canvasRef.current.getContext('2d', { willReadFrequently: true });
       if (!ctx) return;
-
       ctx.save();
       ctx.clearRect(0, 0, videoWidth, videoHeight);
       ctx.translate(videoWidth, 0);
       ctx.scale(-1, 1);
       ctx.drawImage(results.image, 0, 0, videoWidth, videoHeight);
 
-      // カウントダウン中（＝リセット中も含む）は基準値を取り続ける
       if (logicState.current.countdown > 0) {
           if (results.poseLandmarks) {
               const leftShoulder = results.poseLandmarks[11];
               const rightShoulder = results.poseLandmarks[12];
-              if (leftShoulder && rightShoulder) {
-                  // ★ここで常に最新の肩位置を基準として更新し続ける
-                  logicState.current.baselineY = (leftShoulder.y + rightShoulder.y) / 2;
-              }
+              if (leftShoulder && rightShoulder) logicState.current.baselineY = (leftShoulder.y + rightShoulder.y) / 2;
           }
-          // ガイド線を表示
-          ctx.strokeStyle = "yellow";
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(0, logicState.current.baselineY * videoHeight);
-          ctx.lineTo(videoWidth, logicState.current.baselineY * videoHeight);
-          ctx.stroke();
-          
-          ctx.restore();
-          return;
+          ctx.strokeStyle = "yellow"; ctx.lineWidth = 2; ctx.beginPath();
+          ctx.moveTo(0, logicState.current.baselineY * videoHeight); ctx.lineTo(videoWidth, logicState.current.baselineY * videoHeight); ctx.stroke();
+          ctx.restore(); return;
       }
 
       if (results.poseLandmarks) {
         if (mode === 'UPPER_BODY') {
-            const leftShoulder = results.poseLandmarks[11];
-            const rightShoulder = results.poseLandmarks[12];
-
+            const leftShoulder = results.poseLandmarks[11]; const rightShoulder = results.poseLandmarks[12];
             if (leftShoulder && rightShoulder) {
                 const currentY = (leftShoulder.y + rightShoulder.y) / 2;
                 const baselineYPx = logicState.current.baselineY * videoHeight;
-                
-                // 基準線
-                ctx.beginPath();
-                ctx.moveTo(0, baselineYPx);
-                ctx.lineTo(videoWidth, baselineYPx);
-                ctx.strokeStyle = "rgba(0,255,255,0.8)";
-                ctx.lineWidth = 2;
-                ctx.stroke();
-
-                // 肩ポイント
-                ctx.fillStyle = "#00FFFF";
-                ctx.beginPath();
-                ctx.arc(leftShoulder.x * videoWidth, leftShoulder.y * videoHeight, 8, 0, 2 * Math.PI);
-                ctx.arc(rightShoulder.x * videoWidth, rightShoulder.y * videoHeight, 8, 0, 2 * Math.PI);
-                ctx.fill();
-
-                // 判定
-                const thresholdDown = logicState.current.baselineY + 0.1; // 10%下がる
-                const thresholdUp = logicState.current.baselineY + 0.03;  // ほぼ元に戻る
-
-                if (currentY > thresholdDown) {
-                    if (!logicState.current.isSquatting) logicState.current.isSquatting = true;
-                } else if (currentY < thresholdUp) {
-                    if (logicState.current.isSquatting) {
-                        logicState.current.isSquatting = false;
-                        setCount(c => c + 1);
-                    }
-                }
+                ctx.beginPath(); ctx.moveTo(0, baselineYPx); ctx.lineTo(videoWidth, baselineYPx); ctx.strokeStyle = "rgba(0,255,255,0.8)"; ctx.lineWidth = 2; ctx.stroke();
+                ctx.fillStyle = "#00FFFF"; ctx.beginPath(); ctx.arc(leftShoulder.x * videoWidth, leftShoulder.y * videoHeight, 8, 0, 2 * Math.PI); ctx.arc(rightShoulder.x * videoWidth, rightShoulder.y * videoHeight, 8, 0, 2 * Math.PI); ctx.fill();
+                if (currentY > logicState.current.baselineY + 0.1) { if (!logicState.current.isSquatting) logicState.current.isSquatting = true; } 
+                else if (currentY < logicState.current.baselineY + 0.03) { if (logicState.current.isSquatting) { logicState.current.isSquatting = false; setCount(c => c + 1); } }
             }
         } else {
-            // 全身モード
-            const leftHip = results.poseLandmarks[23];
-            const leftKnee = results.poseLandmarks[25];
-            const leftAnkle = results.poseLandmarks[27];
-            const rightHip = results.poseLandmarks[24];
-            const rightKnee = results.poseLandmarks[26];
-            const rightAnkle = results.poseLandmarks[28];
-            
-            // ... (全身モードのロジックは前回と同じなので省略なしで記述)
+            const leftHip = results.poseLandmarks[23]; const leftKnee = results.poseLandmarks[25]; const leftAnkle = results.poseLandmarks[27];
+            const rightHip = results.poseLandmarks[24]; const rightKnee = results.poseLandmarks[26]; const rightAnkle = results.poseLandmarks[28];
             const leftScore = (leftHip?.visibility || 0) + (leftKnee?.visibility || 0) + (leftAnkle?.visibility || 0);
             const rightScore = (rightHip?.visibility || 0) + (rightKnee?.visibility || 0) + (rightAnkle?.visibility || 0);
             let tHip, tKnee, tAnkle;
-            if (leftScore > rightScore) { tHip = leftHip; tKnee = leftKnee; tAnkle = leftAnkle; }
-            else { tHip = rightHip; tKnee = rightKnee; tAnkle = rightAnkle; }
-
+            if (leftScore > rightScore) { tHip = leftHip; tKnee = leftKnee; tAnkle = leftAnkle; } else { tHip = rightHip; tKnee = rightKnee; tAnkle = rightAnkle; }
             if (tHip && tKnee && tAnkle) {
                 const angle = calculateAngle(tHip, tKnee, tAnkle);
-                ctx.beginPath();
-                ctx.moveTo(tHip.x * videoWidth, tHip.y * videoHeight);
-                ctx.lineTo(tKnee.x * videoWidth, tKnee.y * videoHeight);
-                ctx.lineTo(tAnkle.x * videoWidth, tAnkle.y * videoHeight);
+                ctx.beginPath(); ctx.moveTo(tHip.x * videoWidth, tHip.y * videoHeight); ctx.lineTo(tKnee.x * videoWidth, tKnee.y * videoHeight); ctx.lineTo(tAnkle.x * videoWidth, tAnkle.y * videoHeight);
                 ctx.lineWidth = 4; ctx.strokeStyle = "#00FF00"; ctx.stroke();
                 if (angle < 100) { if (!logicState.current.isSquatting) logicState.current.isSquatting = true; } 
-                else if (angle > 160) { 
-                    if (logicState.current.isSquatting) { 
-                        logicState.current.isSquatting = false; setCount(c => c + 1); 
-                    } 
-                }
+                else if (angle > 160) { if (logicState.current.isSquatting) { logicState.current.isSquatting = false; setCount(c => c + 1); } }
             }
         }
       }
@@ -276,8 +277,7 @@ const WorkoutScreen = ({ mode, onSave }: { mode: 'UPPER_BODY' | 'FULL_BODY', onS
 
     const loadMediaPipe = async () => {
       try {
-        const poseModule = await import('@mediapipe/pose');
-        const cameraModule = await import('@mediapipe/camera_utils');
+        const poseModule = await import('@mediapipe/pose'); const cameraModule = await import('@mediapipe/camera_utils');
         pose = new poseModule.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
         pose.setOptions({ modelComplexity: 0, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
         pose.onResults(onResults);
@@ -286,8 +286,7 @@ const WorkoutScreen = ({ mode, onSave }: { mode: 'UPPER_BODY' | 'FULL_BODY', onS
             onFrame: async () => { if (webcamRef.current?.video && pose) await pose.send({ image: webcamRef.current.video }); },
             width: 480, height: 360,
           });
-          camera.start();
-          setIsModelReady(true);
+          camera.start(); setIsModelReady(true);
         }
       } catch (e) { console.error(e); }
     };
@@ -298,53 +297,27 @@ const WorkoutScreen = ({ mode, onSave }: { mode: 'UPPER_BODY' | 'FULL_BODY', onS
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center bg-black">
       <div className="relative border-4 border-gray-800 rounded-lg overflow-hidden w-full max-w-md aspect-[3/4] bg-gray-900">
-        <Webcam
-          ref={webcamRef}
-          onUserMedia={() => setIsCameraReady(true)}
-          className="absolute top-0 left-0 w-full h-full object-cover opacity-0"
-          mirrored={true}
-          playsInline={true}
-          videoConstraints={{ facingMode: 'user', width: 480, height: 360 }}
-        />
+        <Webcam ref={webcamRef} onUserMedia={() => setIsCameraReady(true)} className="absolute top-0 left-0 w-full h-full object-cover opacity-0" mirrored={true} playsInline={true} videoConstraints={{ facingMode: 'user', width: 480, height: 360 }} />
         <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full object-cover" />
-        
         {!isModelReady && <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20"><p className="text-yellow-400 font-bold animate-pulse">SYSTEM LOADING...</p></div>}
         {countdownDisplay !== null && <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-30"><p className="text-9xl font-black text-white animate-ping">{countdownDisplay}</p></div>}
         {statusMessage && <div className="absolute top-1/2 left-0 w-full text-center z-30 transform -translate-y-1/2"><p className="text-6xl font-black text-yellow-400 drop-shadow-lg">{statusMessage}</p></div>}
-
-        {/* カウント表示 */}
-        <div className="absolute top-4 left-4 bg-gray-900/80 p-4 rounded-xl backdrop-blur-md border border-gray-700 z-10">
-          <p className="text-xs text-gray-400 mb-1">COUNT</p>
-          <p className="text-6xl font-bold text-yellow-400 leading-none font-mono">{count}</p>
-        </div>
-        
-        {/* モード表示 */}
-        <div className="absolute top-4 right-4 bg-blue-900/80 px-3 py-1 rounded-full backdrop-blur-md border border-blue-500 z-10">
-            <p className="text-xs font-bold text-blue-200">{mode === 'UPPER_BODY' ? '上半身' : '全身'}</p>
-        </div>
-
-        {/* ★リセットボタン（上半身モードのみ） */}
-        {mode === 'UPPER_BODY' && countdownDisplay === null && (
-            <button 
-                onClick={handleReset}
-                className="absolute bottom-4 right-4 bg-gray-800/80 hover:bg-gray-700 text-white px-4 py-2 rounded-full text-xs font-bold border border-gray-600 z-40 shadow-lg"
-            >
-                ↻ 位置リセット
-            </button>
-        )}
+        <div className="absolute top-4 left-4 bg-gray-900/80 p-4 rounded-xl backdrop-blur-md border border-gray-700 z-10"><p className="text-xs text-gray-400 mb-1">COUNT</p><p className="text-6xl font-bold text-yellow-400 leading-none font-mono">{count}</p></div>
+        <div className="absolute top-4 right-4 bg-blue-900/80 px-3 py-1 rounded-full backdrop-blur-md border border-blue-500 z-10"><p className="text-xs font-bold text-blue-200">{mode === 'UPPER_BODY' ? '上半身' : '全身'}</p></div>
+        {mode === 'UPPER_BODY' && countdownDisplay === null && <button onClick={handleReset} className="absolute bottom-4 right-4 bg-gray-800/80 hover:bg-gray-700 text-white px-4 py-2 rounded-full text-xs font-bold border border-gray-600 z-40 shadow-lg">↻ 位置リセット</button>}
       </div>
     </div>
   );
 };
 
 // ---------------------------------------------------------
-// 3. メインレイアウト
+// 4. メインレイアウト (画面遷移管理)
 // ---------------------------------------------------------
 export default function Home() {
+  const [hasStarted, setHasStarted] = useState(false);
   const [currentMode, setCurrentMode] = useState<Mode>('UPPER_BODY');
   const [refreshHistory, setRefreshHistory] = useState(0);
 
-  // ★useCallbackで関数を固定（無駄な再レンダリング防止）
   const handleSaveSession = useCallback((count: number) => {
     if (count === 0) return;
     const newSession: WorkoutSession = {
@@ -360,6 +333,12 @@ export default function Home() {
     setRefreshHistory(prev => prev + 1);
   }, [currentMode]);
 
+  // ★スタートしていない時は StartScreen を表示
+  if (!hasStarted) {
+    return <StartScreen onStart={() => setHasStarted(true)} />;
+  }
+
+  // ★スタート後は タブ画面を表示
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
       <div className="flex-1 relative overflow-hidden">

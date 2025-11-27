@@ -24,3 +24,32 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+/* ヒートマップの基本スタイル */
+.react-calendar-heatmap text {
+  font-size: 10px;
+  fill: #666;
+}
+.react-calendar-heatmap .react-calendar-heatmap-weekday-labels {
+  display: none;
+}
+
+/* 色の濃さ */
+.react-calendar-heatmap .color-empty { fill: #1f2937; }
+.react-calendar-heatmap .color-scale-1 { fill: #064e3b; }
+.react-calendar-heatmap .color-scale-2 { fill: #065f46; }
+.react-calendar-heatmap .color-scale-3 { fill: #10b981; }
+.react-calendar-heatmap .color-scale-4 { fill: #34d399; }
+
+/* ★重要：今日の枠（点滅する緑の枠線） */
+@keyframes blink-green {
+  0% { stroke-opacity: 1; stroke-width: 2px; }
+  50% { stroke-opacity: 0.2; stroke-width: 2px; }
+  100% { stroke-opacity: 1; stroke-width: 2px; }
+}
+
+.react-calendar-heatmap .today-cell {
+  stroke: #34d399; /* 明るい緑 */
+  fill-opacity: 0.8;
+  animation: blink-green 2s infinite ease-in-out; /* 2秒かけて点滅 */
+  rx: 2px;
+}

@@ -6,7 +6,7 @@ import Webcam from 'react-webcam';
 import CalendarHeatmap from 'react-calendar-heatmap';
 import 'react-calendar-heatmap/dist/styles.css';
 
-const APP_VERSION = "v0.6.6 (Stable Start)";
+const APP_VERSION = "v0.6.7 (Wait for Camera)";
 
 // ---------------------------------------------------------
 // 型定義 & ユーティリティ
@@ -413,7 +413,7 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
 // ---------------------------------------------------------
 // 3. トレーニング画面
 // ---------------------------------------------------------
-const WorkoutScreen = ({ mode, soundType, onSave, videoRef }: { mode: 'SQUAT' | 'PUSHUP', soundType: SoundType, onSave: (count: number, modeStr: string) => void, videoRef: React.RefObject<HTMLVideoElement> }) => {
+const WorkoutScreen = ({ mode, soundType, onSave, videoRef, isCameraReady }: { mode: 'SQUAT' | 'PUSHUP', soundType: SoundType, onSave: (count: number, modeStr: string) => void, videoRef: React.RefObject<HTMLVideoElement>, isCameraReady: boolean }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [squatSubMode, setSquatSubMode] = useState<SquatSubMode>('UPPER');
   const [isPaused, setIsPaused] = useState(false);
@@ -448,10 +448,7 @@ const WorkoutScreen = ({ mode, soundType, onSave, videoRef }: { mode: 'SQUAT' | 
 
   const startCountdown = () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    
-    // ★重複表示を避けるためにステータスをクリア
     setStatusMessage(""); 
-    
     logicState.current.countdown = 3;
     setCountdownDisplay(3);
     
@@ -474,18 +471,23 @@ const WorkoutScreen = ({ mode, soundType, onSave, videoRef }: { mode: 'SQUAT' | 
   const togglePause = () => { setIsPaused(prev => !prev); };
   const toggleMute = (e: React.MouseEvent) => { e.stopPropagation(); setIsMuted(prev => !prev); };
 
-  // 自動スタート時のuseEffect
+  // ★「AI準備完了」かつ「カメラ準備完了」で初めてスタートシーケンスを開始
   useEffect(() => {
-    if (isModelReady && !initialCountdownStarted.current) {
+    // 状態メッセージの更新
+    if (!isCameraReady) {
+        setStatusMessage("カメラ許可待ち...");
+    } else if (!isModelReady) {
+        setStatusMessage("AI準備中...");
+    }
+
+    if (isModelReady && isCameraReady && !initialCountdownStarted.current) {
         initialCountdownStarted.current = true;
-        
-        // ★ロード完了から1秒待ってからカウントダウンを開始（処理落ち・速度異常を防止）
         setStatusMessage("READY?"); 
         setTimeout(() => {
             startCountdown();
         }, 1000);
     }
-  }, [isModelReady]);
+  }, [isModelReady, isCameraReady]);
 
   useEffect(() => {
     let pose: any = null;
@@ -660,12 +662,23 @@ export default function Home() {
   const [refreshHistory, setRefreshHistory] = useState(0);
   const [soundType, setSoundType] = useState<SoundType>('TECH');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  
+  // ★カメラ準備OKフラグ
+  const [isCameraReady, setIsCameraReady] = useState(false);
+
   const webcamRef = useRef<Webcam>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => { const saved = localStorage.getItem('squat_sound_type'); if (saved) setSoundType(saved as SoundType); }, []);
   const handleSoundChange = (type: SoundType) => { setSoundType(type); localStorage.setItem('squat_sound_type', type); };
-  const handleUserMedia = () => { if (webcamRef.current && webcamRef.current.video) { videoRef.current = webcamRef.current.video; } };
+  
+  // ★カメラ映像取得時に呼ばれる関数でフラグを立てる
+  const handleUserMedia = () => { 
+      if (webcamRef.current && webcamRef.current.video) { 
+          videoRef.current = webcamRef.current.video;
+          setIsCameraReady(true);
+      } 
+  };
 
   const handleSaveSession = useCallback((count: number, modeStr: string) => {
     if (count === 0) return;
@@ -678,7 +691,7 @@ export default function Home() {
     setRefreshHistory(prev => prev + 1);
   }, []);
 
-  const goHome = () => { if(confirm("トップ画面に戻りますか？\n(現在のカウントは保存されません)")) { setHasStarted(false); } };
+  const goHome = () => { if(confirm("トップ画面に戻りますか？\n(現在のカウントは保存されません)")) { setHasStarted(false); setIsCameraReady(false); } };
 
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden relative">
@@ -693,7 +706,14 @@ export default function Home() {
             <StartScreen onStart={() => setHasStarted(true)} onOpenSettings={() => setIsSettingsOpen(true)} />
           ) : (
             currentMode === 'HISTORY' ? (<HistoryScreen onDelete={() => setRefreshHistory(prev => prev + 1)} />) : (
-              <WorkoutScreen key={currentMode} mode={currentMode === 'SQUAT' ? 'SQUAT' : 'PUSHUP'} soundType={soundType} onSave={handleSaveSession} videoRef={videoRef as React.RefObject<HTMLVideoElement>} />
+              <WorkoutScreen 
+                  key={currentMode} 
+                  mode={currentMode === 'SQUAT' ? 'SQUAT' : 'PUSHUP'} 
+                  soundType={soundType} 
+                  onSave={handleSaveSession} 
+                  videoRef={videoRef as React.RefObject<HTMLVideoElement>}
+                  isCameraReady={isCameraReady}
+              />
             )
           )}
         </div>

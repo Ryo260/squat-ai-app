@@ -414,11 +414,24 @@ const HistoryScreen = ({ onDelete }: { onDelete: () => void }) => {
 // 3. トレーニング画面
 // ---------------------------------------------------------
 const WorkoutScreen = ({ mode, soundType, onSave, videoRef, isCameraReady }: { mode: 'SQUAT' | 'PUSHUP', soundType: SoundType, onSave: (count: number, modeStr: string) => void, videoRef: React.RefObject<HTMLVideoElement>, isCameraReady: boolean }) => {
+    // ★腕立て伏せの難易度テーブル
+    const difficultyLevels = {
+      LEVEL1: 0.10,  // ちょい下げればOK（初心者）
+      LEVEL2: 0.15,  // 標準
+      LEVEL3: 0.20,  // 深く下げる（上級）
+    } as const;
+  
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [squatSubMode, setSquatSubMode] = useState<SquatSubMode>('UPPER');
   const [isPaused, setIsPaused] = useState(false);
+
+  // ★腕立て伏せの難易度選択（Lv1/Lv2/Lv3）
+  const [currentDifficulty, setCurrentDifficulty] =
+    useState<keyof typeof difficultyLevels>("LEVEL2");
+
   const logicState = useRef({ isSquatting: false, baselineY: 0, countdown: 3 });
   const [count, setCount] = useState(0);
+  
   const countRef = useRef(0);
   const [countdownDisplay, setCountdownDisplay] = useState<number | null>(null);
   const [isModelReady, setIsModelReady] = useState(false);
@@ -532,8 +545,10 @@ const WorkoutScreen = ({ mode, soundType, onSave, videoRef, isCameraReady }: { m
             if (rShoulder && lShoulder && rElbow && lElbow) {
                 const shoulderY = (rShoulder.y + lShoulder.y) / 2;
                 const elbowY = (rElbow.y + lElbow.y) / 2;
-                const difficultyOffset = 0.15; 
-                const targetY = elbowY - difficultyOffset; 
+                // ★選択中の難易度に応じてラインを変える
+                const difficultyOffset = difficultyLevels[currentDifficulty];
+                const targetY = elbowY - difficultyOffset;
+
                 const shoulderPx = shoulderY * videoHeight;
                 const targetPx = targetY * videoHeight;
 
@@ -599,6 +614,7 @@ const WorkoutScreen = ({ mode, soundType, onSave, videoRef, isCameraReady }: { m
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center relative z-10">
       {mode === 'SQUAT' && (
+        
           <div className="absolute top-4 left-0 w-full flex justify-center z-30">
               <div className="bg-gray-800/80 p-1 rounded-full flex space-x-1 border border-gray-600">
                   <button onClick={(e) => { e.stopPropagation(); setSquatSubMode('UPPER'); }} className={`px-3 py-1 rounded-full text-xs font-bold transition ${squatSubMode === 'UPPER' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>UPPER</button>
@@ -635,7 +651,28 @@ const WorkoutScreen = ({ mode, soundType, onSave, videoRef, isCameraReady }: { m
             </div>
             
             <button onClick={toggleMute} className="absolute top-4 right-4 z-50 bg-gray-800/80 p-2 rounded-full border border-gray-600 text-white">{isMuted ? '🔇' : '🔊'}</button>
-
+{/* ★腕立て伏せの難易度切り替えボタン（PUSHUPのときのみ表示） */}
+{mode === 'PUSHUP' && (
+  <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 flex space-x-2 bg-black/40 px-3 py-2 rounded-full border border-gray-600 backdrop-blur-sm">
+    {(['LEVEL1', 'LEVEL2', 'LEVEL3'] as const).map((lv) => (
+      <button
+        key={lv}
+        onClick={(e) => {
+          e.stopPropagation();
+          setCurrentDifficulty(lv);
+        }}
+        className={`
+          text-xs font-bold px-3 py-1 rounded-full border transition-all
+          ${currentDifficulty === lv
+            ? 'bg-orange-500 text-white border-orange-300'
+            : 'bg-gray-700/50 text-gray-300 border-gray-500'}
+        `}
+      >
+        {lv.replace('LEVEL', 'Lv')}
+      </button>
+    ))}
+  </div>
+)}
             {mode === 'PUSHUP' && !isPaused && countdownDisplay === null && (
                 <div className="absolute bottom-4 left-0 w-full text-center z-20">
                       <p className="text-sm font-bold text-white bg-black/50 inline-block px-3 py-1 rounded-full">

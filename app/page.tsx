@@ -458,7 +458,20 @@ const WorkoutScreen = ({ mode, soundType, onSave, videoRef, isCameraReady }: { m
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [onSave, mode, squatSubMode]);
-
+  useEffect(() => {
+    // カウントダウンを完全リセット
+    if (timerRef.current) clearInterval(timerRef.current);
+  
+    logicState.current.countdown = 3;
+    setCountdownDisplay(3);
+  
+    // UI更新のため少し待ってから再カウント開始
+    const t = setTimeout(() => {
+      startCountdown();
+    }, 300);
+  
+    return () => clearTimeout(t);
+  }, [mode, squatSubMode]);
   const startCountdown = () => {
     if (timerRef.current) clearInterval(timerRef.current);
     setStatusMessage(""); 
